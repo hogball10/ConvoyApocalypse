@@ -32,9 +32,35 @@ PartsCatalog.Categories = {
 	"Chassis",
 }
 
--- The frame is free. Everything else comes off a lever.
+-- The frame is free, plus the handful of pieces the starter car is built from.
+-- The lever is for upgrades, not for getting off the pad the first time.
 PartsCatalog.StarterUnlocks = {
 	"chassis_scrap",
+	"plate_common",
+	"engine_common",
+	"wheels_common",
+	"fuel_common",
+	"seat_common",
+}
+
+--[[
+	The car a new player finds already sitting on their pad.
+
+	Laid out against the rules in BlockInBounds / BlocksOverlap /
+	BlockSupported: y is the *bottom* of a block, the plate is the floor
+	everything else rests on, and the wheels sit on the ground just clear of
+	the plate's footprint. Covers every category in RequiredToRun, so START RUN
+	works the moment someone joins.
+]]
+PartsCatalog.StarterBlocks = {
+	{ partId = "plate_common", x = 0, y = 0, z = 0, rot = 0 },
+	{ partId = "engine_common", x = 0, y = 1, z = -2, rot = 0 },
+	{ partId = "seat_common", x = 0, y = 1, z = 1, rot = 0 },
+	{ partId = "fuel_common", x = 2, y = 1, z = 2, rot = 0 },
+	{ partId = "wheels_common", x = -4, y = 0, z = -2, rot = 0 },
+	{ partId = "wheels_common", x = 4, y = 0, z = -2, rot = 0 },
+	{ partId = "wheels_common", x = -4, y = 0, z = 2, rot = 0 },
+	{ partId = "wheels_common", x = 4, y = 0, z = 2, rot = 0 },
 }
 
 PartsCatalog.RequiredToRun = { "Engine", "Wheels", "FuelTank", "Seat" }

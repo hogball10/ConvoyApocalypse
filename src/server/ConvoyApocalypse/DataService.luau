@@ -55,14 +55,41 @@ end
 local function defaultProfile(): PlayerProfile
 	local unlocked: { [string]: boolean } = {}
 	local owned: { [string]: number } = {}
+
+	-- Own at least as many of each piece as the starter car uses, or taking one
+	-- off the pad would leave the player unable to put it back on.
+	local used: { [string]: number } = {}
+	for _, block in PartsCatalog.StarterBlocks do
+		used[block.partId] = (used[block.partId] or 0) + 1
+	end
+
 	for _, id in PartsCatalog.StarterUnlocks do
 		unlocked[id] = true
-		owned[id] = 1
+		owned[id] = math.max(1, used[id] or 0)
+	end
+	for id, count in used do
+		unlocked[id] = true
+		owned[id] = math.max(owned[id] or 0, count)
+	end
+
+	local starterBlocks: { PlacedBlock } = {}
+	for _, block in PartsCatalog.StarterBlocks do
+		table.insert(starterBlocks, {
+			partId = block.partId,
+			x = block.x,
+			y = block.y,
+			z = block.z,
+			rot = block.rot,
+		})
 	end
 
 	local slots: { SlotData } = {}
 	for i = 1, Constants.MAX_SLOTS do
-		slots[i] = { loadout = PartsCatalog.DefaultLoadout(), blocks = {} }
+		-- Only the slot they spawn into gets the car; the rest are blank canvases.
+		slots[i] = {
+			loadout = PartsCatalog.DefaultLoadout(),
+			blocks = if i == 1 then starterBlocks else {},
+		}
 	end
 
 	return {

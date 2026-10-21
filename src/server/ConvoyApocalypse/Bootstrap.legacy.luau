@@ -16,6 +16,10 @@ local root = script.Parent
 local WorldTheme = require(root:WaitForChild("WorldTheme"))
 WorldTheme.Apply()
 
+-- Build the Blender kit before anything asks ArtKit for a prop.
+local ArtImporter = require(root:WaitForChild("ArtImporter"))
+ArtImporter.Build()
+
 local DataService = require(root:WaitForChild("DataService"))
 local ConvoyRunService = require(root:WaitForChild("ConvoyRunService"))
 local GarageService = require(root:WaitForChild("GarageService"))

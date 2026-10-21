@@ -38,7 +38,21 @@ export type RunSession = {
 	zombieFolder: Folder,
 	nextZombie: number,
 	connection: RBXScriptConnection?,
+	-- Step bookkeeping: replication throttle, last distance the road was
+	-- rebuilt at, and the biome currently pushed to Lighting.
+	accum: number,
+	lastRoadDistance: number,
+	appliedBiome: string?,
 }
+
+-- Rebuilding the road and re-pushing Lighting every Heartbeat is wasted work;
+-- segments are 60 studs long so this is still far ahead of the player.
+local ROAD_REFRESH_STUDS = 15
+
+-- Zombies are cheap individually but each one runs its own chase loop, and the
+-- spawn interval shrinks with distance while the batch size grows. Without a
+-- ceiling a long run ends up with hundreds of them.
+local MAX_ZOMBIES = 45
 
 local ConvoyRunService = {}
 ConvoyRunService._runs = {} :: { [string]: RunSession }
@@ -221,7 +235,11 @@ end
 
 local function refreshRoad(session: RunSession)
 	local biome = select(1, getBiome(session.distance))
-	WorldTheme.SetBiome(biome)
+	if biome ~= session.appliedBiome then
+		WorldTheme.SetBiome(biome)
+		session.appliedBiome = biome
+	end
+	session.lastRoadDistance = session.distance
 	local centerZ = session.distance
 	for _, child in session.roadFolder:GetChildren() do
 		local zAttr = tonumber(string.match(child.Name, "Road_(%-?%d+)"))
@@ -489,6 +507,10 @@ function ConvoyRunService.Start(host: Player)
 		zombieFolder = zombieFolder,
 		nextZombie = 0,
 		connection = nil,
+		accum = 0,
+		-- Negative so the first Step always builds the road.
+		lastRoadDistance = -math.huge,
+		appliedBiome = nil,
 	}
 
 	local participant: Participant = {
@@ -688,7 +710,9 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 	session.distance = math.max(session.distance, leadDistance)
 	local _, biomeIndex = getBiome(session.distance)
 	session.biomeIndex = biomeIndex
-	refreshRoad(session)
+	if session.distance - session.lastRoadDistance >= ROAD_REFRESH_STUDS then
+		refreshRoad(session)
+	end
 
 	-- Spawn zombies
 	session.nextZombie -= dt
@@ -696,15 +720,16 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 	if session.nextZombie <= 0 then
 		session.nextZombie = density
 		local count = 1 + math.floor(session.distance / 1500)
-		for _ = 1, count do
+		local headroom = MAX_ZOMBIES - #session.zombieFolder:GetChildren()
+		for _ = 1, math.min(count, headroom) do
 			spawnZombie(session)
 		end
 	end
 
 	-- Replicate state ~10Hz worth via throttle
-	session._accum = (session._accum or 0) + dt
-	if session._accum >= 0.15 then
-		session._accum = 0
+	session.accum += dt
+	if session.accum >= 0.15 then
+		session.accum = 0
 		local payload = ConvoyRunService.Serialize(session)
 		for _, participant in session.participants do
 			Remotes.Event("RunState"):FireClient(participant.player, payload)
