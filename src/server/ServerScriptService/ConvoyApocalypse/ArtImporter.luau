@@ -12,8 +12,11 @@
 	  ServerStorage.ConvoyArt        world props, read by ArtKit
 	  ReplicatedStorage.ConvoyArtSkins  vehicle skins, read by BlockBuilder
 
-	Build is idempotent: if a populated folder is already in the place (saved
-	there by a previous session) nothing is rebuilt.
+	Parts load from their uploaded mesh asset (meshId). A part without one is
+	built from an EditableMesh instead, which only the server can see.
+
+	Build is idempotent: each built item records a signature of its module and
+	is kept while that still matches and all its parts are asset-backed.
 ]]
 
 local AssetService = game:GetService("AssetService")
@@ -31,6 +34,8 @@ type PartData = {
 	color: { number },
 	accent: boolean,
 	center: { number },
+	hash: string,
+	meshId: string?,
 	vertexCount: number,
 	triangleCount: number,
 	verts: string,
@@ -61,8 +66,9 @@ local function materialOf(name: string): Enum.Material
 	return Enum.Material.SmoothPlastic
 end
 
--- One MeshPart from one generated part record.
-local function buildPart(data: PartData): MeshPart?
+-- Fallback for a part that has not been uploaded yet. Only the server can see
+-- an EditableMesh: clients get a checkered placeholder box in its place.
+local function buildEditablePart(data: PartData): MeshPart?
 	local verts = numbers(data.verts)
 	local tris = numbers(data.tris)
 	if #verts < 9 or #tris < 3 then
@@ -83,15 +89,44 @@ local function buildPart(data: PartData): MeshPart?
 		end
 	end
 
+	-- The MeshPart keeps pointing at this EditableMesh, so it must stay alive:
+	-- destroying it leaves the part with nothing to render.
 	local ok, result = pcall(function()
 		return AssetService:CreateMeshPartAsync(Content.fromObject(editable), {
 			CollisionFidelity = Enum.CollisionFidelity.Box,
 		})
 	end)
-	editable:Destroy()
 
 	if not ok then
+		editable:Destroy()
 		warn("[ArtImporter] CreateMeshPartAsync failed for", data.name, result)
+		return nil
+	end
+	return result
+end
+
+local missingUploads = 0
+
+-- One MeshPart from one generated part record.
+local function buildPart(data: PartData): MeshPart?
+	local result: MeshPart? = nil
+	if data.meshId then
+		local ok, loaded = pcall(function()
+			return AssetService:CreateMeshPartAsync(Content.fromUri(data.meshId :: string), {
+				CollisionFidelity = Enum.CollisionFidelity.Box,
+			})
+		end)
+		if ok then
+			result = loaded
+		else
+			warn("[ArtImporter] could not load mesh", data.meshId, "for", data.name, loaded)
+		end
+	end
+	if not result then
+		missingUploads += 1
+		result = buildEditablePart(data)
+	end
+	if not result then
 		return nil
 	end
 
@@ -110,6 +145,32 @@ local function buildPart(data: PartData): MeshPart?
 		meshPart:SetAttribute("TierAccent", true)
 	end
 	return meshPart
+end
+
+-- Fingerprint of a module: its geometry hashes, plus whether each part has
+-- been uploaded, so adding a meshId swaps the placeholder build out.
+local function signature(item: ItemData): string
+	local pieces = table.create(#item.parts)
+	for _, part in item.parts do
+		table.insert(pieces, part.hash .. "=" .. (part.meshId or ""))
+	end
+	return table.concat(pieces, "|")
+end
+
+-- Only asset-backed parts survive a save and reach clients. Anything built
+-- from an EditableMesh (or emptied by a save) is rebuilt.
+local function isCurrent(existing: Instance, sig: string): boolean
+	if existing:GetAttribute("ArtSig") ~= sig then
+		return false
+	end
+	local parts = existing:GetDescendants()
+	table.insert(parts, existing)
+	for _, part in parts do
+		if part:IsA("MeshPart") and part.MeshContent.SourceType ~= Enum.ContentSourceType.Uri then
+			return false
+		end
+	end
+	return true
 end
 
 -- A whole art item: a bare MeshPart when it has one part, a Model otherwise.
@@ -160,8 +221,10 @@ end
 	cylinder.
 ]]
 local function assembleWheelSkin(world: Folder, skins: Folder)
-	if skins:FindFirstChild("Wheel") then
-		return
+	-- Always reassemble: a saved Wheel holds copies of empty tyre/hub meshes.
+	local old = skins:FindFirstChild("Wheel")
+	if old then
+		old:Destroy()
 	end
 	local tire = world:FindFirstChild("WheelTire")
 	local hub = world:FindFirstChild("WheelHub")
@@ -179,11 +242,6 @@ function ArtImporter.Build(): boolean
 	local world = folderNamed(WORLD_FOLDER, ServerStorage)
 	local skins = folderNamed(SKIN_FOLDER, ReplicatedStorage)
 
-	if #world:GetChildren() > 0 and #skins:GetChildren() > 0 then
-		print("[ArtImporter] art already present, skipping rebuild")
-		return true
-	end
-
 	local dataFolder = ReplicatedStorage:WaitForChild("ConvoyShared"):FindFirstChild("ArtData")
 	if not dataFolder then
 		warn("[ArtImporter] ConvoyShared.ArtData is missing -- world will fall back to blocks")
@@ -191,22 +249,66 @@ function ArtImporter.Build(): boolean
 	end
 
 	local started = os.clock()
-	local built, failed = 0, 0
+	local built, kept, failed = 0, 0, 0
+	missingUploads = 0
+
+	-- Loading a mesh asset waits on the network, so one item at a time took
+	-- most of a minute. Load every stale item at once and wait for them all.
+	local pending = 0
+	local caller = coroutine.running()
+	local waiting = false
+	local expected: { [Instance]: { [string]: boolean } } = { [world] = {}, [skins] = { Wheel = true } }
 
 	for _, module in dataFolder:GetChildren() do
 		if module:IsA("ModuleScript") then
-			local ok, item = pcall(require, module)
+			local ok, loaded = pcall(require, module)
 			if not ok then
-				warn("[ArtImporter] could not load", module.Name, item)
+				warn("[ArtImporter] could not load", module.Name, loaded)
 				failed += 1
 				continue
 			end
-			local instance = buildItem(item :: ItemData)
-			if instance then
-				instance.Parent = if (item :: ItemData).folder == "skin" then skins else world
-				built += 1
-			else
-				failed += 1
+			local item = loaded :: ItemData
+			local target = if item.folder == "skin" then skins else world
+			local sig = signature(item)
+			expected[target][item.name] = true
+			local existing = target:FindFirstChild(item.name)
+			if existing and isCurrent(existing, sig) then
+				kept += 1
+				continue
+			end
+			pending += 1
+			task.spawn(function()
+				local instance = buildItem(item)
+				if instance then
+					instance:SetAttribute("ArtSig", sig)
+					if existing then
+						existing:Destroy()
+					end
+					instance.Parent = target
+					built += 1
+				else
+					failed += 1
+				end
+				pending -= 1
+				if pending == 0 and waiting then
+					task.spawn(caller)
+				end
+			end)
+		end
+	end
+
+	if pending > 0 then
+		waiting = true
+		coroutine.yield()
+	end
+
+	-- Drop leftovers no module builds (an earlier session saved some groups
+	-- here). ArtKit looks names up recursively, so their empty parts could
+	-- otherwise be found instead of the real item.
+	for folder, names in expected do
+		for _, child in folder:GetChildren() do
+			if not names[child.Name] then
+				child:Destroy()
 			end
 		end
 	end
@@ -214,10 +316,16 @@ function ArtImporter.Build(): boolean
 	assembleWheelSkin(world, skins)
 
 	print(string.format(
-		"[ArtImporter] built %d art items (%d failed) in %.2fs -- %d world, %d skins",
-		built, failed, os.clock() - started, #world:GetChildren(), #skins:GetChildren()
+		"[ArtImporter] built %d, kept %d art items (%d failed) in %.2fs -- %d world, %d skins",
+		built, kept, failed, os.clock() - started, #world:GetChildren(), #skins:GetChildren()
 	))
-	return built > 0
+	if missingUploads > 0 then
+		warn(string.format(
+			"[ArtImporter] %d part(s) have no uploaded mesh and will show as placeholder boxes to players -- see tools/build_art_modules.py",
+			missingUploads
+		))
+	end
+	return built + kept > 0
 end
 
 return ArtImporter

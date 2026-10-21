@@ -54,12 +54,40 @@ local ROAD_REFRESH_STUDS = 15
 -- ceiling a long run ends up with hundreds of them.
 local MAX_ZOMBIES = 45
 
+-- Seconds before the same zombie can be rammed again.
+local RAM_COOLDOWN = 0.5
+
 local ConvoyRunService = {}
 ConvoyRunService._runs = {} :: { [string]: RunSession }
 ConvoyRunService._playerRun = {} :: { [number]: string }
 
 local function notify(player: Player, message: string)
 	Remotes.Event("Notification"):FireClient(player, message)
+end
+
+-- Step drives the car from the server, so the server has to own its physics.
+-- Sitting welds the character on, and a character's assembly belongs to its
+-- client: left alone, the client drags the car back to wherever the character
+-- was standing and discards every velocity Step writes. Move the character to
+-- the seat first, then take ownership back once the seat weld exists.
+local function seatDriver(player: Player, vehicle: Model)
+	task.defer(function()
+		local character = player.Character or player.CharacterAdded:Wait()
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		local seat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat?
+		local body = vehicle.PrimaryPart
+		if not hum or not seat or not body then
+			return
+		end
+		character:PivotTo(seat.CFrame * CFrame.new(0, 3, 0))
+		seat:Sit(hum)
+		if seat.Occupant ~= hum then
+			seat:GetPropertyChangedSignal("Occupant"):Wait()
+		end
+		if body.Parent then
+			body:SetNetworkOwner(nil)
+		end
+	end)
 end
 
 local function getBiome(distance: number): (string, number)
@@ -289,25 +317,41 @@ local function spawnZombie(session: RunSession)
 	local ahead = session.distance + 80 + math.random(0, 40)
 	body.CFrame = CFrame.new(lane, 2.2, -ahead)
 
-	local zombieMesh = ArtKit.Template("Zombie")
-	if zombieMesh and zombieMesh:IsA("BasePart") then
+	-- The kit zombie is a Model with one MeshPart per colour; only "Skin" takes
+	-- the biome tint. An older single-mesh export is tinted whole.
+	local zombieArt = ArtKit.Template("Zombie")
+	if zombieArt then
 		body.Transparency = 1
-		local visual = ArtKit.Place(zombieMesh, body.CFrame, false)
+		local visual = ArtKit.Place(zombieArt, body.CFrame, false)
+		visual.Name = "ZombieMesh"
+		local scale = if isBrute then 1.4 elseif isRunner then 0.88 else 1
+		local pieces: { BasePart } = {}
 		if visual:IsA("BasePart") then
-			visual.Name = "ZombieMesh"
 			visual.Color = skin
-			visual.Material = Enum.Material.SmoothPlastic
-			if isBrute then
-				visual.Size = visual.Size * 1.4
-			elseif isRunner then
-				visual.Size = visual.Size * 0.88
+			visual.Size *= scale
+			table.insert(pieces, visual)
+		elseif visual:IsA("Model") then
+			visual.WorldPivot = body.CFrame
+			visual:ScaleTo(scale)
+			for _, desc in visual:GetDescendants() do
+				if desc:IsA("BasePart") then
+					if desc.Name == "Skin" then
+						desc.Color = skin
+					elseif desc.Name == "Eyes" and isRunner then
+						desc.Color = Color3.fromRGB(255, 60, 40)
+					end
+					desc.CanQuery = false
+					table.insert(pieces, desc)
+				end
 			end
-			visual.Parent = zombie
+		end
+		for _, piece in pieces do
 			local meshWeld = Instance.new("WeldConstraint")
 			meshWeld.Part0 = body
-			meshWeld.Part1 = visual
+			meshWeld.Part1 = piece
 			meshWeld.Parent = body
 		end
+		visual.Parent = zombie
 	end
 
 	local head = Instance.new("Part")
@@ -337,6 +381,7 @@ local function spawnZombie(session: RunSession)
 		eye.Material = Enum.Material.Neon
 		eye.CanCollide = false
 		eye.Massless = true
+		eye.Transparency = head.Transparency
 		eye.CFrame = head.CFrame * CFrame.new(x, 0.1, -0.5)
 		eye.Parent = zombie
 		local ew = Instance.new("WeldConstraint")
@@ -433,6 +478,15 @@ function ConvoyRunService.BindVehicle(session: RunSession, participant: Particip
 			return
 		end
 
+		-- Touched fires for every part of the zombie and keeps firing while they
+		-- overlap, so without this one collision costs the car many self-hits.
+		local now = os.clock()
+		local lastRam = model:GetAttribute("LastRam") :: number?
+		if lastRam and now - lastRam < RAM_COOLDOWN then
+			return
+		end
+		model:SetAttribute("LastRam", now)
+
 		local ram = vehicle:GetAttribute("RamDamage") :: number or Constants.RAM_DAMAGE
 		hum:TakeDamage(ram * (speed / 40))
 		ConvoyRunService.DamageVehicle(session, participant, Constants.RAM_SELF_DAMAGE)
@@ -486,15 +540,7 @@ function ConvoyRunService.Start(host: Player)
 	local vehicle = VehicleFactory.Create(host, blocks, spawnCF)
 	vehicle.Parent = vehiclesFolder
 
-	-- Seat player
-	task.defer(function()
-		local character = host.Character or host.CharacterAdded:Wait()
-		local hum = character:FindFirstChildOfClass("Humanoid")
-		local seat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat
-		if hum and seat then
-			seat:Sit(hum)
-		end
-	end)
+	seatDriver(host, vehicle)
 
 	local session: RunSession = {
 		id = runId,
@@ -566,14 +612,7 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 	local vehicle = VehicleFactory.Create(player, blocks, spawnCF)
 	vehicle.Parent = vehiclesFolder
 
-	task.defer(function()
-		local character = player.Character or player.CharacterAdded:Wait()
-		local hum = character:FindFirstChildOfClass("Humanoid")
-		local seat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat
-		if hum and seat then
-			seat:Sit(hum)
-		end
-	end)
+	seatDriver(player, vehicle)
 
 	local participant: Participant = {
 		player = player,
