@@ -121,7 +121,7 @@ function RunHUD.Build()
 
 	local endPanel = UIUtil.Frame({
 		Name = "EndPanel",
-		Size = UDim2.new(0, 420, 0, 200),
+		Size = UDim2.new(0, 420, 0, 310),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Visible = false,
@@ -141,7 +141,7 @@ function RunHUD.Build()
 	UIUtil.Text({
 		Name = "EndDetail",
 		Text = "",
-		Size = UDim2.new(1, -24, 0, 60),
+		Size = UDim2.new(1, -24, 0, 160),
 		Position = UDim2.new(0, 12, 0, 70),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextColor3 = UIUtil.Colors.Text,
@@ -174,11 +174,22 @@ function RunHUD.Update(state: any)
 		local endPanel = gui:FindFirstChild("EndPanel") :: Frame
 		endPanel.Visible = true
 		local detail = endPanel:FindFirstChild("EndDetail") :: TextLabel
-		detail.Text = string.format(
-			"Distance: %.0f m\nScrap earned: %d",
-			state.distance or 0,
-			state.scrapEarned or 0
-		)
+		local title = endPanel:FindFirstChild("EndTitle") :: TextLabel
+		title.Text = if state.newRecord then "NEW RECORD!" else "RUN OVER"
+		title.TextColor3 = if state.newRecord then UIUtil.Colors.Scrap else UIUtil.Colors.Danger
+		local lines = {
+			string.format("Distance: %.0f m  (+%d scrap)", state.distance or 0, state.distanceScrap or 0),
+			string.format("Kills: %d  (+%d scrap)", state.kills or 0, state.killScrap or 0),
+		}
+		if (state.bossKills or 0) > 0 then
+			table.insert(lines, string.format("Juggernauts: %d  (+%d scrap)", state.bossKills, state.bossScrap or 0))
+		end
+		table.insert(lines, string.format("Pickups: %d", state.pickups or 0))
+		table.insert(lines, string.format("Total scrap: %d    XP: +%d", state.scrapEarned or 0, state.xpEarned or 0))
+		if (state.levelsGained or 0) > 0 then
+			table.insert(lines, string.format("LEVEL UP! Now level %d", state.level or 1))
+		end
+		detail.Text = table.concat(lines, "\n")
 		return
 	end
 

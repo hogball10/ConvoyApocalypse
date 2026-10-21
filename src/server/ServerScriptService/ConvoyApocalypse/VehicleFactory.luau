@@ -123,6 +123,9 @@ function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: 
 	model:SetAttribute("FireRate", stats.fireRate)
 	model:SetAttribute("RepairPerSec", stats.repairPerSec)
 	model:SetAttribute("BoostMult", stats.boostMult)
+	model:SetAttribute("PickupMult", stats.pickupMult)
+	model:SetAttribute("ScrapMult", stats.scrapMult)
+	model:SetAttribute("WeaponKind", stats.weaponKind)
 	model:SetAttribute("Kills", 0)
 	model:SetAttribute("Alive", true)
 

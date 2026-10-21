@@ -85,15 +85,46 @@ export type LeverTarget = {
 	prefix: string,
 }
 
-PartsCatalog.PartTargets = {
+-- One lever per group. A pull only rolls parts from the target selected on
+-- that lever, so each category can be farmed on its own.
+PartsCatalog.LeverKinds = {
+	{ kind = "Body", title = "BODY", color = Color3.fromRGB(255, 150, 50) },
+	{ kind = "Drive", title = "DRIVETRAIN", color = Color3.fromRGB(80, 170, 255) },
+	{ kind = "Gear", title = "ARMOR & GEAR", color = Color3.fromRGB(110, 220, 130) },
+	{ kind = "Weapons", title = "WEAPONS", color = Color3.fromRGB(255, 70, 70) },
+}
+
+PartsCatalog.BodyTargets = {
 	{ id = "brick", label = "Brick", short = "BRICK", category = "Block", prefix = "brick" },
 	{ id = "long", label = "Long Brick", short = "LONG", category = "Block", prefix = "long" },
 	{ id = "plate", label = "Plate", short = "PLATE", category = "Block", prefix = "plate" },
+	{ id = "slab", label = "Slab", short = "SLAB", category = "Block", prefix = "slab" },
 	{ id = "wedge", label = "Slope", short = "SLOPE", category = "Block", prefix = "wedge" },
-	{ id = "engine", label = "Engine", short = "ENG", category = "Engine", prefix = "engine" },
-	{ id = "wheels", label = "Wheel", short = "TIRE", category = "Wheels", prefix = "wheels" },
+	{ id = "pillar", label = "Pillar", short = "PILLAR", category = "Block", prefix = "pillar" },
+} :: { LeverTarget }
+
+PartsCatalog.DriveTargets = {
+	{ id = "engine", label = "Engine", short = "ENGINE", category = "Engine", prefix = "engine" },
+	{ id = "turbo", label = "Turbo Engine", short = "TURBO", category = "Engine", prefix = "engine_turbo" },
+	{ id = "diesel", label = "Diesel Engine", short = "DIESEL", category = "Engine", prefix = "engine_diesel" },
+	{ id = "wheels", label = "Wheels", short = "WHEELS", category = "Wheels", prefix = "wheels" },
+	{ id = "mud", label = "Mud Tires", short = "MUD", category = "Wheels", prefix = "wheels_mud" },
+	{ id = "racing", label = "Racing Slicks", short = "SLICKS", category = "Wheels", prefix = "wheels_race" },
 	{ id = "fuel", label = "Fuel Can", short = "FUEL", category = "FuelTank", prefix = "fuel" },
+	{ id = "barrel", label = "Fuel Barrel", short = "BARREL", category = "FuelTank", prefix = "fuel_barrel" },
+	{ id = "cell", label = "Light Cell", short = "CELL", category = "FuelTank", prefix = "fuel_cell" },
 	{ id = "seat", label = "Driver Seat", short = "SEAT", category = "Seat", prefix = "seat" },
+} :: { LeverTarget }
+
+PartsCatalog.GearTargets = {
+	{ id = "chassis", label = "Frame", short = "FRAME", category = "Chassis", prefix = "chassis" },
+	{ id = "armor", label = "Armor", short = "ARMOR", category = "Armor", prefix = "armor" },
+	{ id = "spiked", label = "Spiked Armor", short = "SPIKED", category = "Armor", prefix = "armor_spiked" },
+	{ id = "heavy", label = "Heavy Armor", short = "HEAVY", category = "Armor", prefix = "armor_heavy" },
+	{ id = "repair", label = "Repair Kit", short = "REPAIR", category = "Utility", prefix = "utility_repair" },
+	{ id = "boost", label = "Nitro", short = "NITRO", category = "Utility", prefix = "utility_boost" },
+	{ id = "magnet", label = "Scrap Magnet", short = "MAGNET", category = "Utility", prefix = "utility_magnet" },
+	{ id = "salvage", label = "Salvage Rig", short = "SALVAGE", category = "Utility", prefix = "utility_salvage" },
 } :: { LeverTarget }
 
 PartsCatalog.WeaponTargets = {
@@ -102,6 +133,8 @@ PartsCatalog.WeaponTargets = {
 	{ id = "flame", label = "Flamethrower", short = "FLAME", category = "Weapon", prefix = "weapon_flame" },
 	{ id = "rail", label = "Rail Cannon", short = "RAIL", category = "Weapon", prefix = "weapon_rail" },
 	{ id = "ram", label = "Ram", short = "RAM", category = "Weapon", prefix = "weapon_ram" },
+	{ id = "shotgun", label = "Shotgun", short = "SHOT", category = "Weapon", prefix = "weapon_shotgun" },
+	{ id = "rocket", label = "Rocket Pod", short = "ROCKET", category = "Weapon", prefix = "weapon_rocket" },
 } :: { LeverTarget }
 
 local Parts: { [string]: PartDef } = {
@@ -418,26 +451,6 @@ local Parts: { [string]: PartDef } = {
 	},
 
 	-- Utility
-	utility_repair_common = {
-		id = "utility_repair_common",
-		name = "Patch Kit",
-		category = "Utility",
-		tier = "Common",
-		weight = 4,
-		unlockCost = 45,
-		stats = { repairPerSec = 2, boostMult = 1 },
-		description = "Slow auto-repair while driving.",
-	},
-	utility_boost_rare = {
-		id = "utility_boost_rare",
-		name = "Nitro Canister",
-		category = "Utility",
-		tier = "Rare",
-		weight = 6,
-		unlockCost = 130,
-		stats = { repairPerSec = 0, boostMult = 1.4 },
-		description = "Hold Shift for a speed burst.",
-	},
 	utility_combo_epic = {
 		id = "utility_combo_epic",
 		name = "Field Workshop",
@@ -450,9 +463,9 @@ local Parts: { [string]: PartDef } = {
 	},
 }
 
-local TIER_NAMES = { "Common", "Rare", "Epic", "Legendary" }
-local TIER_MULT = { Common = 1, Rare = 1.45, Epic = 2.05, Legendary = 2.8 }
-local TIER_INDEX = { Common = 1, Rare = 2, Epic = 3, Legendary = 4 }
+local TIER_NAMES = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+local TIER_MULT = { Common = 1, Rare = 1.45, Epic = 2.05, Legendary = 2.8, Mythic = 3.7 }
+local TIER_INDEX = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
 
 local function scaled(base: number, tier: string): number
 	return math.floor(base * TIER_MULT[tier] + 0.5)
@@ -462,10 +475,177 @@ local function addPart(def: PartDef)
 	Parts[def.id] = def
 end
 
+-- Mythic sits above Legendary. The hand-written families end at Legendary, so
+-- the top rung is derived from it rather than typed out a sixth time.
+local MYTHIC_NAMES = {
+	chassis = "Doomsday Hull",
+	engine = "Quantum Drive",
+	wheels = "Hover Rings",
+	fuel = "Singularity Cell",
+	armor = "Void Plating",
+}
+local MYTHIC_BOOST = 1.3
+
+for _, legendary in table.clone(Parts) do
+	local family = string.match(legendary.id, "^(%a+)_legendary$")
+	local mythicName = family and MYTHIC_NAMES[family]
+	if mythicName then
+		local stats: { [string]: number } = {}
+		for key, value in legendary.stats do
+			-- Hardpoints are a count, not a magnitude.
+			stats[key] = if key == "hardpoints" then value + 1 else value * MYTHIC_BOOST
+		end
+		addPart({
+			id = family .. "_mythic",
+			name = mythicName,
+			category = legendary.category,
+			tier = "Mythic",
+			weight = math.floor(legendary.weight * 1.1),
+			unlockCost = legendary.unlockCost * 2,
+			stats = stats,
+			description = legendary.description,
+		})
+	end
+end
+
+-- Variants trade one stat for another so a category has real choices in it.
+-- Each entry scales the matching base part (engine_<tier> etc.) tier by tier.
+local variantFamilies: {
+	{
+		base: string,
+		prefix: string,
+		label: string,
+		weight: number,
+		scale: { [string]: number },
+		extra: ((string) -> { [string]: number })?,
+		desc: string,
+	}
+} = {
+	{
+		base = "engine", prefix = "engine_turbo", label = "Turbo", weight = 1,
+		scale = { speed = 1.15, accel = 0.8 },
+		desc = "Top speed over punch.",
+	},
+	{
+		base = "engine", prefix = "engine_diesel", label = "Diesel", weight = 1.3,
+		scale = { speed = 0.85, accel = 1.3 },
+		desc = "Heavy torque, lower top end.",
+	},
+	{
+		base = "wheels", prefix = "wheels_mud", label = "Mud", weight = 1.2,
+		scale = { offroad = 1.4, handling = 0.85 },
+		desc = "Digs through anything, wanders on tarmac.",
+	},
+	{
+		base = "wheels", prefix = "wheels_race", label = "Slick", weight = 0.9,
+		scale = { handling = 1.3, offroad = 0.7 },
+		desc = "Razor handling on the road only.",
+	},
+	{
+		base = "fuel", prefix = "fuel_barrel", label = "Barrel", weight = 1.4,
+		scale = { fuel = 1.3 },
+		desc = "More range, more mass.",
+	},
+	{
+		base = "fuel", prefix = "fuel_cell", label = "Light", weight = 0.55,
+		scale = { fuel = 0.85 },
+		desc = "A little less fuel for almost no weight.",
+	},
+	{
+		base = "armor", prefix = "armor_spiked", label = "Spiked", weight = 1,
+		scale = { damageReduction = 0.8 },
+		extra = function(tier: string): { [string]: number }
+			return { ramDamage = 5 * TIER_INDEX[tier] }
+		end,
+		desc = "Less protection, but the spikes hurt to ram.",
+	},
+	{
+		base = "armor", prefix = "armor_heavy", label = "Heavy", weight = 1.4,
+		scale = { damageReduction = 1.25 },
+		desc = "Thick plating. Slows you down.",
+	},
+}
+
+for _, family in variantFamilies do
+	for _, tier in TIER_NAMES do
+		local base = Parts[family.base .. "_" .. string.lower(tier)]
+		if base then
+			local stats: { [string]: number } = {}
+			for key, value in base.stats do
+				stats[key] = value * (family.scale[key] or 1)
+			end
+			local extra = family.extra
+			if extra then
+				for key, value in extra(tier) do
+					stats[key] = (stats[key] or 0) + value
+				end
+			end
+			addPart({
+				id = family.prefix .. "_" .. string.lower(tier),
+				name = family.label .. " " .. base.name,
+				category = base.category,
+				tier = tier,
+				weight = math.floor(base.weight * family.weight + 0.5),
+				unlockCost = 0,
+				stats = stats,
+				description = family.desc,
+			})
+		end
+	end
+end
+
+local utilityFamilies = {
+	{
+		prefix = "utility_repair", name = "Patch Kit", weight = 4,
+		desc = "Slow auto-repair while driving.",
+		stats = function(tier: string): { [string]: number }
+			return { repairPerSec = scaled(2, tier) }
+		end,
+	},
+	{
+		prefix = "utility_boost", name = "Nitro Canister", weight = 6,
+		desc = "A speed burst on demand.",
+		stats = function(tier: string): { [string]: number }
+			return { boostMult = 1 + 0.2 * TIER_INDEX[tier] }
+		end,
+	},
+	{
+		prefix = "utility_magnet", name = "Scrap Magnet", weight = 8,
+		desc = "Pulls pickups in from further away.",
+		stats = function(tier: string): { [string]: number }
+			return { pickupMult = 1.4 + 0.4 * TIER_INDEX[tier] }
+		end,
+	},
+	{
+		prefix = "utility_salvage", name = "Salvage Rig", weight = 12,
+		desc = "Strips every kill and mile for extra scrap.",
+		stats = function(tier: string): { [string]: number }
+			return { scrapMult = 1 + 0.15 * TIER_INDEX[tier] }
+		end,
+	},
+}
+
+for _, family in utilityFamilies do
+	for _, tier in TIER_NAMES do
+		addPart({
+			id = family.prefix .. "_" .. string.lower(tier),
+			name = tier .. " " .. family.name,
+			category = "Utility",
+			tier = tier,
+			weight = family.weight,
+			unlockCost = 0,
+			stats = family.stats(tier),
+			description = family.desc,
+		})
+	end
+end
+
 local bodyPieces = {
 	{ prefix = "brick", name = "Brick", category = "Block", weight = 4, health = 16, cap = 0, desc = "A 2x1 building brick." },
 	{ prefix = "long", name = "Long Brick", category = "Block", weight = 6, health = 26, cap = 0, desc = "A long building brick." },
 	{ prefix = "plate", name = "Plate", category = "Block", weight = 3, health = 10, cap = 0, desc = "A flat plate." },
+	{ prefix = "slab", name = "Slab", category = "Block", weight = 7, health = 30, cap = 0, desc = "A broad, sturdy deck panel." },
+	{ prefix = "pillar", name = "Pillar", category = "Block", weight = 6, health = 22, cap = 0, desc = "A tall post for cabs and roll cages." },
 	{ prefix = "wedge", name = "Slope", category = "Block", weight = 4, health = 14, cap = 0, desc = "A sloped brick." },
 	{ prefix = "seat", name = "Seat", category = "Seat", weight = 3, health = 4, cap = 0, desc = "Driver seat. Place it wherever you sit." },
 }
@@ -527,6 +707,24 @@ local weaponFamilies = {
 		desc = "Slow shot. Punches a hole through the road.",
 		stats = function(tier: string): { [string]: number }
 			return { ramDamage = 20, gunDamage = scaled(36, tier), fireRate = 1.2 }
+		end,
+	},
+	{
+		prefix = "weapon_shotgun",
+		name = "Shotgun",
+		weight = 13,
+		desc = "Close-range blast that shreds everything in the cone.",
+		stats = function(tier: string): { [string]: number }
+			return { ramDamage = 8, gunDamage = scaled(14, tier), fireRate = 1.6 }
+		end,
+	},
+	{
+		prefix = "weapon_rocket",
+		name = "Rocket Pod",
+		weight = 20,
+		desc = "Long-range rockets with a big splash.",
+		stats = function(tier: string): { [string]: number }
+			return { ramDamage = 6, gunDamage = scaled(30, tier), fireRate = 0.9 }
 		end,
 	},
 	{
@@ -592,6 +790,9 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 	fireRate: number,
 	repairPerSec: number,
 	boostMult: number,
+	pickupMult: number,
+	scrapMult: number,
+	weaponKind: string,
 	overweight: boolean,
 }
 	local stats = {
@@ -610,6 +811,9 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 		fireRate = 0,
 		repairPerSec = 0,
 		boostMult = 1,
+		pickupMult = 1,
+		scrapMult = 1,
+		weaponKind = "",
 		overweight = false,
 	}
 
@@ -620,6 +824,10 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 			for key, value in part.stats do
 				if key == "boostMult" then
 					stats.boostMult = math.max(stats.boostMult, value)
+				elseif key == "pickupMult" then
+					stats.pickupMult = math.max(stats.pickupMult, value)
+				elseif key == "scrapMult" then
+					stats.scrapMult = math.max(stats.scrapMult, value)
 				elseif typeof(stats[key]) == "number" then
 					stats[key] = (stats[key] :: number) + value
 				end
@@ -683,8 +891,21 @@ end
 function PartsCatalog.TargetsFor(kind: string): { LeverTarget }
 	if kind == "Weapons" then
 		return PartsCatalog.WeaponTargets
+	elseif kind == "Drive" then
+		return PartsCatalog.DriveTargets
+	elseif kind == "Gear" then
+		return PartsCatalog.GearTargets
 	end
-	return PartsCatalog.PartTargets
+	return PartsCatalog.BodyTargets
+end
+
+function PartsCatalog.IsLeverKind(kind: string): boolean
+	for _, entry in PartsCatalog.LeverKinds do
+		if entry.kind == kind then
+			return true
+		end
+	end
+	return false
 end
 
 function PartsCatalog.FindTarget(kind: string, targetId: string): LeverTarget?
@@ -712,6 +933,10 @@ local SHAPES: { [string]: { size: Vector3, kind: string } } = {
 	brick = { size = Vector3.new(4, 2, 2), kind = "brick" },
 	long = { size = Vector3.new(8, 2, 2), kind = "brick" },
 	plate = { size = Vector3.new(6, 1, 6), kind = "plate" },
+	slab = { size = Vector3.new(8, 1, 4), kind = "plate" },
+	pillar = { size = Vector3.new(2, 4, 2), kind = "brick" },
+	armor = { size = Vector3.new(4, 1, 2), kind = "armor" },
+	utility = { size = Vector3.new(2, 2, 2), kind = "utility" },
 	wedge = { size = Vector3.new(4, 2, 4), kind = "wedge" },
 	engine = { size = Vector3.new(4, 2, 4), kind = "engine" },
 	wheels = { size = Vector3.new(2, 2, 2), kind = "wheel" },
@@ -722,6 +947,8 @@ local SHAPES: { [string]: { size: Vector3, kind: string } } = {
 	weapon_flame = { size = Vector3.new(2, 2, 4), kind = "flame" },
 	weapon_rail = { size = Vector3.new(2, 2, 6), kind = "rail" },
 	weapon_ram = { size = Vector3.new(6, 2, 2), kind = "ram" },
+	weapon_shotgun = { size = Vector3.new(2, 2, 4), kind = "shotgun" },
+	weapon_rocket = { size = Vector3.new(4, 2, 4), kind = "rocket" },
 }
 
 local SHAPE_PREFIXES = {
@@ -730,9 +957,15 @@ local SHAPE_PREFIXES = {
 	"weapon_flame",
 	"weapon_rail",
 	"weapon_ram",
+	"weapon_shotgun",
+	"weapon_rocket",
 	"long",
 	"brick",
 	"plate",
+	"slab",
+	"pillar",
+	"armor",
+	"utility",
 	"wedge",
 	"engine",
 	"wheels",
@@ -801,7 +1034,16 @@ function PartsCatalog.BlockSupported(block: PlacedBlock, others: { PlacedBlock }
 end
 
 function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
-	local rank = { Scrap = 0, Common = 1, Rare = 2, Epic = 3, Legendary = 4 }
+	local rank = { Scrap = 0, Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+	-- Same tier: prefer the part with the bigger stats, so which variant counts
+	-- does not depend on table iteration order.
+	local function power(part: PartDef): number
+		local total = 0
+		for _, value in part.stats do
+			total += value
+		end
+		return total
+	end
 	local best: { [string]: PartDef } = {}
 	local extraHealth = 0
 	local extraWeight = 0
@@ -813,9 +1055,12 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 				extraWeight += part.weight
 			else
 				local current = best[part.category]
-				if not current or (rank[part.tier] or 0) > (rank[current.tier] or 0) then
+				local better = current ~= nil
+					and ((rank[part.tier] or 0) > (rank[current.tier] or 0)
+						or ((rank[part.tier] or 0) == (rank[current.tier] or 0) and power(part) > power(current)))
+				if not current or better then
 					best[part.category] = part
-			end
+				end
 			end
 		end
 	end
@@ -824,6 +1069,9 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 		loadout[category] = part.id
 	end
 	local stats = PartsCatalog.ComputeLoadoutStats(loadout)
+	if best.Weapon then
+		stats.weaponKind = PartsCatalog.BlockKind(best.Weapon.id)
+	end
 	if stats.overweight then
 		local penalty = math.clamp(1 - (stats.weight - stats.weightCap) / math.max(stats.weightCap, 1), 0.5, 1)
 		if penalty > 0 then

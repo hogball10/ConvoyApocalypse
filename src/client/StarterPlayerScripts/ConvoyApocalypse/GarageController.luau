@@ -72,7 +72,72 @@ local inventoryScroll: ScrollingFrame? = nil
 local inventoryButton: TextButton? = nil
 local holdPart: (string) -> ()
 
-local function refreshInventory()
+local TIER_RANK = { Scrap = 0, Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+
+-- Tabs along the top of the inventory. `category` nil means everything.
+local INVENTORY_TABS: { { label: string, category: string? } } = {
+	{ label = "ALL", category = nil },
+	{ label = "BODY", category = "Block" },
+	{ label = "ENGINE", category = "Engine" },
+	{ label = "WHEELS", category = "Wheels" },
+	{ label = "FUEL", category = "FuelTank" },
+	{ label = "SEAT", category = "Seat" },
+	{ label = "ARMOR", category = "Armor" },
+	{ label = "GEAR", category = "Utility" },
+	{ label = "FRAME", category = "Chassis" },
+	{ label = "GUNS", category = "Weapon" },
+}
+local inventoryFilter: string? = nil
+
+-- Short readable stat line for a part row, e.g. "SPD 70   ACC 32".
+local STAT_LABELS: { [string]: string } = {
+	health = "HP",
+	speed = "SPD",
+	accel = "ACC",
+	handling = "HND",
+	offroad = "OFF",
+	fuel = "FUEL",
+	damageReduction = "DEF",
+	gunDamage = "DMG",
+	fireRate = "RATE",
+	ramDamage = "RAM",
+	repairPerSec = "REPAIR",
+	boostMult = "BOOST",
+	pickupMult = "REACH",
+	scrapMult = "SCRAP",
+	weightCap = "CAP",
+}
+local STAT_ORDER = {
+	"speed", "accel", "handling", "offroad", "fuel", "damageReduction", "gunDamage", "fireRate",
+	"ramDamage", "repairPerSec", "boostMult", "pickupMult", "scrapMult", "weightCap", "health",
+}
+
+local function statLine(part: any): string
+	local bits = {}
+	for _, key in STAT_ORDER do
+		local value = part.stats[key]
+		if value and value ~= 0 then
+			local text
+			if key == "damageReduction" then
+				text = string.format("%d%%", math.round(value * 100))
+			elseif value >= 10 then
+				text = tostring(math.round(value))
+			else
+				text = string.format("%.1f", value)
+			end
+			table.insert(bits, (STAT_LABELS[key] or key) .. " " .. text)
+			if #bits >= 3 then
+				break
+			end
+		end
+	end
+	table.insert(bits, "WT " .. tostring(part.weight))
+	return table.concat(bits, "   ")
+end
+
+local refreshInventory: () -> ()
+
+refreshInventory = function()
 	if not inventoryScroll or not inventoryButton then
 		return
 	end
@@ -82,22 +147,31 @@ local function refreshInventory()
 		end
 	end
 	local rows = {}
+	local total = 0
 	local data = GarageController._data
 	local owned = if data and typeof(data.ownedParts) == "table" then data.ownedParts else {}
 	for partId, _count in owned do
 		local left = unplaced(partId)
 		local part = PartsCatalog.Get(partId)
-		if part and left > 0 and part.category ~= "Chassis" then
-			table.insert(rows, { id = partId, left = left, part = part })
+		if part and left > 0 then
+			total += 1
+			if inventoryFilter == nil or part.category == inventoryFilter then
+				table.insert(rows, { id = partId, left = left, part = part })
+			end
 		end
 	end
+	-- Group by category, best tier first inside each.
 	table.sort(rows, function(a, b)
-		if a.part.category == b.part.category then
-			return a.part.name < b.part.name
+		if a.part.category ~= b.part.category then
+			return a.part.category < b.part.category
 		end
-		return a.part.category < b.part.category
+		local ra, rb = TIER_RANK[a.part.tier] or 0, TIER_RANK[b.part.tier] or 0
+		if ra ~= rb then
+			return ra > rb
+		end
+		return a.part.name < b.part.name
 	end)
-	inventoryButton.Text = "INVENTORY (" .. tostring(#rows) .. ")"
+	inventoryButton.Text = "INVENTORY (" .. tostring(total) .. ")"
 	if #rows == 0 then
 		local empty = Instance.new("TextLabel")
 		empty.BackgroundTransparency = 1
@@ -107,15 +181,35 @@ local function refreshInventory()
 		empty.TextWrapped = true
 		empty.TextXAlignment = Enum.TextXAlignment.Left
 		empty.TextColor3 = UIUtil.Colors.Muted
-		empty.Text = "No parts yet. Pull a lever, then buy the one it lands on."
+		empty.Text = if total == 0
+			then "No parts yet. Pull a lever, then buy the one it lands on."
+			else "Nothing in this category. Try another tab."
 		empty.Parent = inventoryScroll
 		return
 	end
-	for index, row in rows do
+	local lastCategory = ""
+	local order = 0
+	for _, row in rows do
+		if inventoryFilter == nil and row.part.category ~= lastCategory then
+			lastCategory = row.part.category
+			order += 1
+			local header = Instance.new("TextLabel")
+			header.LayoutOrder = order
+			header.BackgroundTransparency = 1
+			header.Size = UDim2.new(1, 0, 0, 20)
+			header.Font = Enum.Font.GothamBlack
+			header.TextSize = 12
+			header.TextXAlignment = Enum.TextXAlignment.Left
+			header.TextColor3 = UIUtil.Colors.Accent
+			header.Text = string.upper(PartsCatalog.SocketLabel[lastCategory] or lastCategory)
+			header.Parent = inventoryScroll
+		end
+		order += 1
+		local tierColor = Constants.TIER_COLORS[row.part.tier] or UIUtil.Colors.Accent
 		local button = Instance.new("TextButton")
 		button.Name = row.id
-		button.LayoutOrder = index
-		button.Size = UDim2.new(1, 0, 0, 40)
+		button.LayoutOrder = order
+		button.Size = UDim2.new(1, 0, 0, 48)
 		button.BackgroundColor3 = if GarageController._holdId == row.id then UIUtil.Colors.AccentDim else UIUtil.Colors.PanelAlt
 		button.BorderSizePixel = 0
 		button.AutoButtonColor = true
@@ -127,24 +221,34 @@ local function refreshInventory()
 		local stripe = Instance.new("Frame")
 		stripe.Size = UDim2.new(0, 5, 1, -8)
 		stripe.Position = UDim2.fromOffset(4, 4)
-		stripe.BackgroundColor3 = Constants.TIER_COLORS[row.part.tier] or UIUtil.Colors.Accent
+		stripe.BackgroundColor3 = tierColor
 		stripe.BorderSizePixel = 0
 		stripe.Parent = button
 		local name = Instance.new("TextLabel")
 		name.BackgroundTransparency = 1
-		name.Position = UDim2.fromOffset(16, 0)
-		name.Size = UDim2.new(1, -56, 1, 0)
+		name.Position = UDim2.fromOffset(16, 3)
+		name.Size = UDim2.new(1, -64, 0, 22)
 		name.Font = Enum.Font.GothamBold
 		name.TextSize = 14
 		name.TextXAlignment = Enum.TextXAlignment.Left
-		name.TextColor3 = UIUtil.Colors.Text
+		name.TextColor3 = tierColor
 		name.Text = row.part.name
 		name.Parent = button
+		local detail = Instance.new("TextLabel")
+		detail.BackgroundTransparency = 1
+		detail.Position = UDim2.fromOffset(16, 25)
+		detail.Size = UDim2.new(1, -64, 0, 18)
+		detail.Font = Enum.Font.Gotham
+		detail.TextSize = 11
+		detail.TextXAlignment = Enum.TextXAlignment.Left
+		detail.TextColor3 = UIUtil.Colors.Muted
+		detail.Text = row.part.tier .. "  ·  " .. statLine(row.part)
+		detail.Parent = button
 		local count = Instance.new("TextLabel")
 		count.BackgroundTransparency = 1
 		count.AnchorPoint = Vector2.new(1, 0)
 		count.Position = UDim2.new(1, -8, 0, 0)
-		count.Size = UDim2.fromOffset(36, 40)
+		count.Size = UDim2.fromOffset(36, 48)
 		count.Font = Enum.Font.GothamBold
 		count.TextSize = 14
 		count.TextColor3 = UIUtil.Colors.Scrap
@@ -168,8 +272,8 @@ local function buildInventory()
 	})
 	inventoryPanel = UIUtil.Frame({
 		Name = "Panel",
-		Size = UDim2.fromOffset(280, 360),
-		Position = UDim2.new(0, 16, 1, -424),
+		Size = UDim2.fromOffset(340, 460),
+		Position = UDim2.new(0, 16, 1, -524),
 		Visible = false,
 		Parent = gui,
 	})
@@ -192,10 +296,49 @@ local function buildInventory()
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = inventoryPanel,
 	})
+
+	local tabs = Instance.new("Frame")
+	tabs.Name = "Tabs"
+	tabs.BackgroundTransparency = 1
+	tabs.Size = UDim2.new(1, -16, 0, 56)
+	tabs.Position = UDim2.fromOffset(8, 54)
+	tabs.Parent = inventoryPanel
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.2, -4, 0, 26)
+	grid.CellPadding = UDim2.fromOffset(4, 4)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = tabs
+	local tabButtons: { [number]: TextButton } = {}
+	local function paintTabs()
+		for index, tab in INVENTORY_TABS do
+			tabButtons[index].BackgroundColor3 = if inventoryFilter == tab.category then UIUtil.Colors.Accent else UIUtil.Colors.PanelAlt
+		end
+	end
+	for index, tab in INVENTORY_TABS do
+		local button = Instance.new("TextButton")
+		button.LayoutOrder = index
+		button.BorderSizePixel = 0
+		button.Font = Enum.Font.GothamBold
+		button.TextSize = 11
+		button.TextColor3 = Color3.new(1, 1, 1)
+		button.Text = tab.label
+		button.Parent = tabs
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 5)
+		c.Parent = button
+		tabButtons[index] = button
+		button.MouseButton1Click:Connect(function()
+			inventoryFilter = tab.category
+			paintTabs()
+			refreshInventory()
+		end)
+	end
+	paintTabs()
+
 	inventoryScroll = UIUtil.Scroll({
 		Name = "List",
-		Size = UDim2.new(1, -16, 1, -62),
-		Position = UDim2.fromOffset(8, 54),
+		Size = UDim2.new(1, -16, 1, -122),
+		Position = UDim2.fromOffset(8, 116),
 		Parent = inventoryPanel,
 	})
 	inventoryButton.MouseButton1Click:Connect(function()
@@ -204,6 +347,129 @@ local function buildInventory()
 		end
 	end)
 	refreshInventory()
+end
+
+-- Lever picker: shown while standing near a lever, picks what that lever rolls.
+
+local selectedTargets: { [string]: string } = {}
+local leverFrame: Frame? = nil
+local leverChips: Frame? = nil
+local leverTitle: TextLabel? = nil
+local shownLever: string? = nil
+
+local function selectedFor(kind: string): string
+	local picked = selectedTargets[kind]
+	if picked then
+		return picked
+	end
+	local first = PartsCatalog.TargetsFor(kind)[1]
+	return if first then first.id else ""
+end
+
+local function showLeverPicker(kind: string?)
+	if not leverFrame or not leverChips or not leverTitle then
+		return
+	end
+	if kind == nil then
+		leverFrame.Visible = false
+		shownLever = nil
+		return
+	end
+	shownLever = kind
+	leverFrame.Visible = true
+	local title = kind
+	for _, entry in PartsCatalog.LeverKinds do
+		if entry.kind == kind then
+			title = entry.title
+		end
+	end
+	leverTitle.Text = title .. " LEVER  -  choose what it rolls"
+	for _, child in leverChips:GetChildren() do
+		if child:IsA("GuiButton") then
+			child:Destroy()
+		end
+	end
+	local chosen = selectedFor(kind)
+	for index, target in PartsCatalog.TargetsFor(kind) do
+		local chip = Instance.new("TextButton")
+		chip.LayoutOrder = index
+		chip.BorderSizePixel = 0
+		chip.Font = Enum.Font.GothamBold
+		chip.TextSize = 13
+		chip.TextColor3 = Color3.new(1, 1, 1)
+		chip.Text = target.label
+		chip.BackgroundColor3 = if target.id == chosen then UIUtil.Colors.Accent else UIUtil.Colors.PanelAlt
+		chip.Parent = leverChips
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 6)
+		c.Parent = chip
+		chip.MouseButton1Click:Connect(function()
+			selectedTargets[kind] = target.id
+			Remotes.Event("SelectLeverTarget"):FireServer(kind, target.id)
+			showLeverPicker(kind)
+		end)
+	end
+end
+
+local function buildLeverPicker()
+	local gui = UIUtil.ScreenGui("LeverPicker", player:WaitForChild("PlayerGui"))
+	local frame = UIUtil.Frame({
+		Name = "Panel",
+		Size = UDim2.fromOffset(620, 130),
+		Position = UDim2.new(0.5, 0, 1, -24),
+		AnchorPoint = Vector2.new(0.5, 1),
+		Visible = false,
+		Parent = gui,
+	})
+	leverFrame = frame
+	leverTitle = UIUtil.Text({
+		Name = "Title",
+		Text = "",
+		Size = UDim2.new(1, -16, 0, 24),
+		Position = UDim2.fromOffset(8, 6),
+		Font = Enum.Font.GothamBlack,
+		TextColor3 = UIUtil.Colors.Accent,
+		Parent = frame,
+	})
+	local chips = Instance.new("Frame")
+	chips.Name = "Chips"
+	chips.BackgroundTransparency = 1
+	chips.Size = UDim2.new(1, -16, 1, -40)
+	chips.Position = UDim2.fromOffset(8, 34)
+	chips.Parent = frame
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.2, -6, 0, 34)
+	grid.CellPadding = UDim2.fromOffset(6, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = chips
+	leverChips = chips
+
+	-- Which lever (if any) the character is standing at.
+	task.spawn(function()
+		while true do
+			task.wait(0.2)
+			local garage = myGarage()
+			local root = if player.Character then player.Character:FindFirstChild("HumanoidRootPart") else nil
+			local near: string? = nil
+			if garage and root and root:IsA("BasePart") and not GarageController._inRun then
+				local best = 18
+				for _, entry in PartsCatalog.LeverKinds do
+					local base = garage:FindFirstChild("LeverBase_" .. entry.kind)
+					if base and base:IsA("BasePart") then
+						local flat = Vector3.new(base.Position.X, root.Position.Y, base.Position.Z)
+						local d = (flat - root.Position).Magnitude
+						if d < best then
+							best = d
+							near = entry.kind
+						end
+					end
+				end
+			end
+			if near ~= shownLever then
+				showLeverPicker(near)
+			end
+		end
+	end)
 end
 
 local function writeLabel(name: string, text: string, color: Color3?)
@@ -438,11 +704,19 @@ end
 function GarageController.Init()
 	Remotes.Init()
 	buildInventory()
+	buildLeverPicker()
 
 	Remotes.Event("DataUpdated").OnClientEvent:Connect(function(data)
 		GarageController._data = data
 		refreshScrap()
 		refreshInventory()
+	end)
+
+	Remotes.Event("LeverTarget").OnClientEvent:Connect(function(kind: string, targetId: string)
+		selectedTargets[kind] = targetId
+		if shownLever == kind then
+			showLeverPicker(kind)
+		end
 	end)
 
 	Remotes.Event("Notification").OnClientEvent:Connect(function(message: string)

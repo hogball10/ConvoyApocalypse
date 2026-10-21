@@ -34,6 +34,10 @@ export type PlayerProfile = {
 	activeSlot: number,
 	slots: { SlotData },
 	highScore: number,
+	xp: number,
+	level: number,
+	totalKills: number,
+	totalRuns: number,
 	ownedParts: { [string]: number }, -- inventory counts for tradeable extras (prototype: 1 per unlock)
 }
 
@@ -99,6 +103,10 @@ local function defaultProfile(): PlayerProfile
 		activeSlot = 1,
 		slots = slots,
 		highScore = 0,
+		xp = 0,
+		level = 1,
+		totalKills = 0,
+		totalRuns = 0,
 		ownedParts = owned,
 	}
 end
@@ -304,6 +312,26 @@ function DataService.UpdateHighScore(player: Player, distance: number)
 		profile.highScore = math.floor(distance)
 		DataService.Replicate(player)
 	end
+end
+
+-- Adds XP, rolling over levels. Each new level pays a scrap bonus.
+function DataService.AddRunProgress(player: Player, xp: number, kills: number): (number, number)
+	local profile = DataService._profiles[player.UserId]
+	if not profile then
+		return 1, 0
+	end
+	profile.totalRuns += 1
+	profile.totalKills += kills
+	profile.xp += math.floor(xp)
+	local levelsGained = 0
+	while profile.xp >= Constants.XpToNext(profile.level) do
+		profile.xp -= Constants.XpToNext(profile.level)
+		profile.level += 1
+		levelsGained += 1
+		profile.scrap += Constants.LEVEL_UP_SCRAP * profile.level
+	end
+	DataService.Replicate(player)
+	return profile.level, levelsGained
 end
 
 -- Trading helpers: only unequipped owned parts

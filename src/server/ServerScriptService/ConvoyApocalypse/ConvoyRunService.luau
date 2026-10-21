@@ -25,6 +25,8 @@ export type Participant = {
 	kills: number,
 	alive: boolean,
 	overwhelmTimer: number,
+	pickups: number,
+	bossKills: number,
 }
 
 export type RunSession = {
@@ -37,6 +39,9 @@ export type RunSession = {
 	roadFolder: Folder,
 	zombieFolder: Folder,
 	nextZombie: number,
+	pickupFolder: Folder,
+	nextPickup: number,
+	bossesSpawned: number,
 	connection: RBXScriptConnection?,
 	-- Step bookkeeping: replication throttle, last distance the road was
 	-- rebuilt at, and the biome currently pushed to Lighting.
@@ -284,14 +289,15 @@ local function refreshRoad(session: RunSession)
 	end
 end
 
-local function spawnZombie(session: RunSession)
+local function spawnZombie(session: RunSession, isBoss: boolean?)
 	local biomeName, _ = getBiome(session.distance)
 	local scale = 1 + session.distance / 800
-	local isRunner = session.distance > 300 and math.random() < 0.25
-	local isBrute = session.distance > 700 and math.random() < 0.12
+	local boss = isBoss == true
+	local isRunner = not boss and session.distance > 300 and math.random() < 0.25
+	local isBrute = boss or (session.distance > 700 and math.random() < 0.12)
 
 	local zombie = Instance.new("Model")
-	zombie.Name = if isBrute then "Brute" elseif isRunner then "Runner" else "Walker"
+	zombie.Name = if boss then "Juggernaut" elseif isBrute then "Brute" elseif isRunner then "Runner" else "Walker"
 
 	local skin = if biomeName == "SnowyMountains"
 		then Color3.fromRGB(170, 185, 175)
@@ -313,7 +319,7 @@ local function spawnZombie(session: RunSession)
 	body.CanCollide = true
 	body.Parent = zombie
 
-	local lane = (math.random() - 0.5) * 28
+	local lane = if boss then 0 else (math.random() - 0.5) * 28
 	local ahead = session.distance + 80 + math.random(0, 40)
 	body.CFrame = CFrame.new(lane, 2.2, -ahead)
 
@@ -324,7 +330,7 @@ local function spawnZombie(session: RunSession)
 		body.Transparency = 1
 		local visual = ArtKit.Place(zombieArt, body.CFrame, false)
 		visual.Name = "ZombieMesh"
-		local scale = if isBrute then 1.4 elseif isRunner then 0.88 else 1
+		local scale = if boss then 2.4 elseif isBrute then 1.4 elseif isRunner then 0.88 else 1
 		local pieces: { BasePart } = {}
 		if visual:IsA("BasePart") then
 			visual.Color = skin
@@ -391,7 +397,7 @@ local function spawnZombie(session: RunSession)
 	end
 
 	local hum = Instance.new("Humanoid")
-	hum.MaxHealth = Constants.ZOMBIE_BASE_HEALTH * scale * (if isBrute then 2.5 else 1) * (if isRunner then 0.7 else 1)
+	hum.MaxHealth = Constants.ZOMBIE_BASE_HEALTH * scale * (if boss then 12 elseif isBrute then 2.5 else 1) * (if isRunner then 0.7 else 1)
 	hum.Health = hum.MaxHealth
 	hum.WalkSpeed = Constants.ZOMBIE_BASE_SPEED * (if isRunner then 1.8 else 1) * (if isBrute then 0.7 else 1) * math.min(scale, 2)
 	hum.HipHeight = body.Size.Y * 0.5
@@ -399,7 +405,8 @@ local function spawnZombie(session: RunSession)
 
 	zombie.PrimaryPart = body
 
-	zombie:SetAttribute("Damage", Constants.ZOMBIE_BASE_DAMAGE * scale * (if isBrute then 2 else 1))
+	zombie:SetAttribute("Damage", Constants.ZOMBIE_BASE_DAMAGE * scale * (if boss then 3 elseif isBrute then 2 else 1))
+	zombie:SetAttribute("Boss", boss)
 	zombie:SetAttribute("RunId", session.id)
 	zombie.Parent = session.zombieFolder
 
@@ -433,7 +440,236 @@ local function spawnZombie(session: RunSession)
 	end)
 
 	-- Ram detection via Touched on vehicles is handled in bindVehicle
-	Debris:AddItem(zombie, 45)
+	Debris:AddItem(zombie, if boss then 90 else 45)
+end
+
+-- Every kill goes through here so boss kills pay out and announce consistently.
+local function creditKill(session: RunSession, participant: Participant, zombie: Model)
+	participant.kills += 1
+	participant.vehicle:SetAttribute("Kills", participant.kills)
+	if zombie:GetAttribute("Boss") == true then
+		participant.bossKills += 1
+		for _, p in session.participants do
+			notify(p.player, participant.player.Name .. " took down a JUGGERNAUT!")
+		end
+	end
+	zombie:Destroy()
+end
+
+local PICKUP_KINDS = {
+	{ kind = "Fuel", color = Color3.fromRGB(240, 170, 45), weight = 4 },
+	{ kind = "Scrap", color = Color3.fromRGB(255, 220, 90), weight = 5 },
+	{ kind = "Repair", color = Color3.fromRGB(70, 220, 120), weight = 3 },
+}
+local PICKUP_RADIUS = 9
+local PICKUP_INTERVAL = 6
+local BOSS_EVERY = 1000
+
+local function spawnPickup(session: RunSession)
+	local total = 0
+	for _, k in PICKUP_KINDS do
+		total += k.weight
+	end
+	local roll = math.random() * total
+	local chosen = PICKUP_KINDS[1]
+	for _, k in PICKUP_KINDS do
+		roll -= k.weight
+		if roll <= 0 then
+			chosen = k
+			break
+		end
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "Pickup_" .. chosen.kind
+	part.Shape = Enum.PartType.Ball
+	part.Size = Vector3.new(3, 3, 3)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Material = Enum.Material.Neon
+	part.Color = chosen.color
+	part.Position = Vector3.new((math.random() - 0.5) * 24, 3.5, -(session.distance + 140 + math.random(0, 60)))
+	part:SetAttribute("Kind", chosen.kind)
+	local light = Instance.new("PointLight")
+	light.Color = chosen.color
+	light.Range = 16
+	light.Brightness = 2
+	light.Parent = part
+	part.Parent = session.pickupFolder
+	Debris:AddItem(part, 40)
+end
+
+local function collectPickup(participant: Participant, pickup: BasePart)
+	local kind = pickup:GetAttribute("Kind")
+	local vehicle = participant.vehicle
+	if kind == "Fuel" then
+		local maxFuel = vehicle:GetAttribute("MaxFuel") :: number
+		vehicle:SetAttribute("Fuel", math.min(maxFuel, (vehicle:GetAttribute("Fuel") :: number) + maxFuel * 0.3))
+		notify(participant.player, "+30% fuel")
+	elseif kind == "Repair" then
+		local maxHealth = vehicle:GetAttribute("MaxHealth") :: number
+		vehicle:SetAttribute("Health", math.min(maxHealth, (vehicle:GetAttribute("Health") :: number) + maxHealth * 0.25))
+		notify(participant.player, "+25% repairs")
+	else
+		DataService.AddScrap(participant.player, 25)
+		notify(participant.player, "+25 scrap")
+	end
+	participant.pickups += 1
+	pickup:Destroy()
+end
+
+-- ── Weapons ────────────────────────────────────────────────────────────────
+
+local function tracer(from: Vector3, to: Vector3, color: Color3, width: number)
+	local dist = (to - from).Magnitude
+	if dist < 0.5 then
+		return
+	end
+	local beam = Instance.new("Part")
+	beam.Anchored = true
+	beam.CanCollide = false
+	beam.CanQuery = false
+	beam.CanTouch = false
+	beam.Material = Enum.Material.Neon
+	beam.Color = color
+	beam.Size = Vector3.new(width, width, dist)
+	beam.CFrame = CFrame.lookAt(from, to) * CFrame.new(0, 0, -dist / 2)
+	beam.Parent = Workspace
+	Debris:AddItem(beam, 0.12)
+end
+
+local function hit(session: RunSession, participant: Participant, zombie: Model, damage: number): boolean
+	local hum = zombie:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then
+		return false
+	end
+	hum:TakeDamage(damage)
+	if hum.Health <= 0 then
+		creditKill(session, participant, zombie)
+	end
+	return true
+end
+
+-- Live zombies as (model, position-in-vehicle-space) so each weapon only has to
+-- describe its own targeting shape.
+local function targets(session: RunSession, body: BasePart): { { model: Model, rel: Vector3, pos: Vector3 } }
+	local list = {}
+	for _, zombie in session.zombieFolder:GetChildren() do
+		if zombie:IsA("Model") and zombie.PrimaryPart then
+			local pos = zombie.PrimaryPart.Position
+			table.insert(list, { model = zombie, rel = body.CFrame:PointToObjectSpace(pos), pos = pos })
+		end
+	end
+	return list
+end
+
+-- Forward is -Z in vehicle space; nearer first.
+local function inFront(list, minZ: number, maxZ: number, halfWidth: number)
+	local out = {}
+	for _, t in list do
+		if t.rel.Z < -minZ and t.rel.Z > -maxZ and math.abs(t.rel.X) < halfWidth then
+			table.insert(out, t)
+		end
+	end
+	table.sort(out, function(a, b)
+		return a.rel.Z > b.rel.Z
+	end)
+	return out
+end
+
+local function fireWeapon(session: RunSession, participant: Participant, body: BasePart, damage: number)
+	local kind = participant.vehicle:GetAttribute("WeaponKind")
+	local muzzle = body.Position + Vector3.new(0, 2.5, 0)
+	local all = targets(session, body)
+
+	if kind == "tesla" then
+		-- Arcs to the nearest zombie, then chains to up to three neighbours.
+		local first = inFront(all, 2, 55, 20)[1]
+		if not first then
+			return
+		end
+		local struck: { [Model]: boolean } = {}
+		local current = first
+		local from = muzzle
+		local dmg = damage
+		for _ = 1, 4 do
+			struck[current.model] = true
+			tracer(from, current.pos, Color3.fromRGB(120, 200, 255), 0.35)
+			hit(session, participant, current.model, dmg)
+			from = current.pos
+			dmg *= 0.75
+			local nextTarget
+			local nextDist = 18
+			for _, t in all do
+				if not struck[t.model] and t.model.Parent then
+					local d = (t.pos - current.pos).Magnitude
+					if d < nextDist then
+						nextDist = d
+						nextTarget = t
+					end
+				end
+			end
+			if not nextTarget then
+				break
+			end
+			current = nextTarget
+		end
+	elseif kind == "flame" then
+		-- Short cone, burns everything in it.
+		for _, t in inFront(all, 1, 28, 9) do
+			hit(session, participant, t.model, damage * 0.5)
+		end
+		local mid = body.CFrame:PointToWorldSpace(Vector3.new(0, 1.5, -14))
+		tracer(muzzle, mid, Color3.fromRGB(255, 120, 30), 3)
+	elseif kind == "rail" then
+		-- Pierces: every zombie in a long narrow lane takes the full hit.
+		local lane = inFront(all, 1, 140, 3.5)
+		for _, t in lane do
+			hit(session, participant, t.model, damage)
+		end
+		tracer(muzzle, body.CFrame:PointToWorldSpace(Vector3.new(0, 2.5, -140)), Color3.fromRGB(150, 255, 255), 0.6)
+	elseif kind == "shotgun" then
+		-- Wide cone, up to five zombies, only up close.
+		local count = 0
+		for _, t in inFront(all, 1, 38, 14) do
+			tracer(muzzle, t.pos, Color3.fromRGB(255, 220, 120), 0.2)
+			hit(session, participant, t.model, damage)
+			count += 1
+			if count >= 5 then
+				break
+			end
+		end
+	elseif kind == "rocket" then
+		-- Lobs at the nearest far zombie and splashes everything around it.
+		local aim = inFront(all, 8, 100, 24)[1]
+		if not aim then
+			return
+		end
+		tracer(muzzle, aim.pos, Color3.fromRGB(255, 200, 80), 0.5)
+		local blast = Instance.new("Explosion")
+		blast.Position = aim.pos
+		blast.BlastRadius = 14
+		blast.BlastPressure = 0
+		blast.DestroyJointRadiusPercent = 0
+		blast.ExplosionType = Enum.ExplosionType.NoCraters
+		blast.Parent = Workspace
+		for _, t in all do
+			if t.model.Parent and (t.pos - aim.pos).Magnitude <= 14 then
+				hit(session, participant, t.model, damage)
+			end
+		end
+	elseif kind == "ram" then
+		return
+	else
+		-- Minigun and anything unrecognised: rapid single-target fire.
+		local aim = inFront(all, 2, 60, 12)[1]
+		if aim then
+			tracer(muzzle, aim.pos, Color3.fromRGB(255, 240, 160), 0.15)
+			hit(session, participant, aim.model, damage)
+		end
+	end
 end
 
 function ConvoyRunService.DamageVehicle(session: RunSession, participant: Participant, rawDamage: number)
@@ -492,9 +728,7 @@ function ConvoyRunService.BindVehicle(session: RunSession, participant: Particip
 		ConvoyRunService.DamageVehicle(session, participant, Constants.RAM_SELF_DAMAGE)
 
 		if hum.Health <= 0 then
-			participant.kills += 1
-			vehicle:SetAttribute("Kills", participant.kills)
-			model:Destroy()
+			creditKill(session, participant, model)
 		end
 	end)
 end
@@ -532,6 +766,10 @@ function ConvoyRunService.Start(host: Player)
 	zombieFolder.Name = "Zombies_" .. runId
 	zombieFolder.Parent = world
 
+	local pickupFolder = Instance.new("Folder")
+	pickupFolder.Name = "Pickups_" .. runId
+	pickupFolder.Parent = world
+
 	local vehiclesFolder = Instance.new("Folder")
 	vehiclesFolder.Name = "Vehicles_" .. runId
 	vehiclesFolder.Parent = world
@@ -552,6 +790,9 @@ function ConvoyRunService.Start(host: Player)
 		roadFolder = roadFolder,
 		zombieFolder = zombieFolder,
 		nextZombie = 0,
+		pickupFolder = pickupFolder,
+		nextPickup = 3,
+		bossesSpawned = 0,
 		connection = nil,
 		accum = 0,
 		-- Negative so the first Step always builds the road.
@@ -565,6 +806,8 @@ function ConvoyRunService.Start(host: Player)
 		kills = 0,
 		alive = true,
 		overwhelmTimer = 0,
+		pickups = 0,
+		bossKills = 0,
 	}
 	session.participants[host.UserId] = participant
 	ConvoyRunService._runs[runId] = session
@@ -620,6 +863,8 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 		kills = 0,
 		alive = true,
 		overwhelmTimer = 0,
+		pickups = 0,
+		bossKills = 0,
 	}
 	session.participants[player.UserId] = participant
 	ConvoyRunService._playerRun[player.UserId] = session.id
@@ -719,29 +964,13 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 			participant.overwhelmTimer = 0
 		end
 
-		-- Auto gun: damage nearby zombies in front
+		-- Auto weapon: each kind fires differently (see fireWeapon)
 		local gunDamage = vehicle:GetAttribute("GunDamage") :: number
 		local fireRate = vehicle:GetAttribute("FireRate") :: number
 		if gunDamage > 0 and fireRate > 0 and fuel > 0 then
 			-- Probabilistic fire each step scaled by fireRate
 			if math.random() < fireRate * dt then
-				for _, zombie in session.zombieFolder:GetChildren() do
-					if zombie:IsA("Model") and zombie.PrimaryPart then
-						local offset = body.CFrame:PointToObjectSpace(zombie.PrimaryPart.Position)
-						if offset.Z < -2 and offset.Z > -60 and math.abs(offset.X) < 12 then
-							local hum = zombie:FindFirstChildOfClass("Humanoid")
-							if hum and hum.Health > 0 then
-								hum:TakeDamage(gunDamage)
-								if hum.Health <= 0 then
-									participant.kills += 1
-									vehicle:SetAttribute("Kills", participant.kills)
-									zombie:Destroy()
-								end
-								break
-							end
-						end
-					end
-				end
+				fireWeapon(session, participant, body, gunDamage)
 			end
 		end
 	end
@@ -762,6 +991,36 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		local headroom = MAX_ZOMBIES - #session.zombieFolder:GetChildren()
 		for _ = 1, math.min(count, headroom) do
 			spawnZombie(session)
+		end
+	end
+
+	-- Pickups: fuel / scrap / repair orbs ahead of the convoy
+	session.nextPickup -= dt
+	if session.nextPickup <= 0 then
+		session.nextPickup = PICKUP_INTERVAL
+		spawnPickup(session)
+	end
+	for _, pickup in session.pickupFolder:GetChildren() do
+		if not pickup:IsA("BasePart") then
+			continue
+		end
+		for _, participant in session.participants do
+			local pBody = participant.vehicle.PrimaryPart
+			local reach = PICKUP_RADIUS * ((participant.vehicle:GetAttribute("PickupMult") :: number?) or 1)
+			if participant.alive and pBody and (pBody.Position - pickup.Position).Magnitude < reach then
+				collectPickup(participant, pickup)
+				break
+			end
+		end
+	end
+
+	-- Juggernaut boss every BOSS_EVERY studs
+	local bossDue = math.floor(session.distance / BOSS_EVERY)
+	if bossDue > session.bossesSpawned then
+		session.bossesSpawned = bossDue
+		spawnZombie(session, true)
+		for _, participant in session.participants do
+			notify(participant.player, "A JUGGERNAUT approaches! Ram it or shoot it down.")
 		end
 	end
 
@@ -829,20 +1088,28 @@ function ConvoyRunService.EndRun(session: RunSession)
 
 	for _, participant in session.participants do
 		local killScrap = participant.kills * Constants.SCRAP_PER_KILL
-		local total = distanceScrap + killScrap
+		local bossScrap = participant.bossKills * Constants.BOSS_SCRAP
+		local scrapMult = (participant.vehicle:GetAttribute("ScrapMult") :: number?) or 1
+		local distanceScrap = math.floor(distanceScrap * scrapMult)
+		killScrap = math.floor(killScrap * scrapMult)
+		bossScrap = math.floor(bossScrap * scrapMult)
+		local total = distanceScrap + killScrap + bossScrap
+		local xp = math.floor(distance / Constants.XP_PER_METERS)
+			+ participant.kills * Constants.XP_PER_KILL
+			+ participant.bossKills * Constants.XP_PER_BOSS
+		local previous = DataService.Get(participant.player)
+		local isRecord = previous ~= nil and distance > previous.highScore
 		DataService.AddScrap(participant.player, total)
 		DataService.UpdateHighScore(participant.player, distance)
+		local level, levelsGained = DataService.AddRunProgress(participant.player, xp, participant.kills)
 		DataService.Save(participant.player)
 		notify(
 			participant.player,
-			string.format(
-				"Run over! Distance %.0f m | +%d scrap (dist %d + kills %d)",
-				distance,
-				total,
-				distanceScrap,
-				killScrap
-			)
+			string.format("Run over! Distance %.0f m | +%d scrap | +%d xp", distance, total, xp)
 		)
+		if levelsGained > 0 then
+			notify(participant.player, string.format("LEVEL UP! You are now level %d", level))
+		end
 		Remotes.Event("RunState"):FireClient(participant.player, {
 			runId = session.id,
 			distance = distance,
@@ -850,6 +1117,16 @@ function ConvoyRunService.EndRun(session: RunSession)
 			active = false,
 			ended = true,
 			scrapEarned = total,
+			distanceScrap = distanceScrap,
+			killScrap = killScrap,
+			bossScrap = bossScrap,
+			kills = participant.kills,
+			bossKills = participant.bossKills,
+			pickups = participant.pickups,
+			xpEarned = xp,
+			level = level,
+			levelsGained = levelsGained,
+			newRecord = isRecord,
 			vehicles = {},
 		})
 		ConvoyRunService._playerRun[participant.player.UserId] = nil
@@ -862,6 +1139,9 @@ function ConvoyRunService.EndRun(session: RunSession)
 		end
 		if session.zombieFolder.Parent then
 			session.zombieFolder:Destroy()
+		end
+		if session.pickupFolder.Parent then
+			session.pickupFolder:Destroy()
 		end
 		local world = Workspace:FindFirstChild("ConvoyWorld")
 		if world then

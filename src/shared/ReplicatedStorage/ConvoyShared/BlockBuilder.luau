@@ -190,6 +190,73 @@ function BlockBuilder.Create(partId: string, cf: CFrame): Model
 	elseif kind == "rail" then
 		local body = box("Rail", Vector3.new(0.6, 0.6, size.Z), color, Vector3.zero, Enum.Material.Neon)
 		model.PrimaryPart = body
+	elseif kind == "shotgun" then
+		local stock = box("Stock", Vector3.new(1.6, 1.2, 1.6), Color3.fromRGB(70, 45, 30), Vector3.new(0, 0, 1), Enum.Material.Wood)
+		for side = -1, 1, 2 do
+			local barrel = box("Barrel", Vector3.new(0.5, 0.5, 2.6), Color3.fromRGB(25, 25, 28), Vector3.new(side * 0.4, 0.15, -1.1), Enum.Material.Metal)
+			barrel.CanCollide = false
+			barrel.Massless = true
+			weld(stock, barrel)
+		end
+		local band = box("Band", Vector3.new(1.5, 0.35, 0.4), color, Vector3.new(0, 0.15, -1.2), Enum.Material.Metal)
+		band.CanCollide = false
+		band.Massless = true
+		weld(stock, band)
+		model.PrimaryPart = stock
+	elseif kind == "rocket" then
+		local pod = box("Pod", Vector3.new(3.4, 1.8, 2.6), Color3.fromRGB(55, 60, 50), Vector3.new(0, 0, 0.6), Enum.Material.Metal)
+		for ix = 0, 1 do
+			for iy = 0, 1 do
+				local tube = box("Tube", Vector3.new(1.2, 1.2, 1.2), Color3.fromRGB(20, 20, 22), Vector3.new(-0.85 + ix * 1.7, -0.45 + iy * 0.9, -0.8), Enum.Material.Metal)
+				tube.Shape = Enum.PartType.Cylinder
+				tube.CFrame = tube.CFrame * CFrame.Angles(0, math.rad(90), 0)
+				tube.Size = Vector3.new(1.4, 0.8, 0.8)
+				tube.CanCollide = false
+				tube.Massless = true
+				weld(pod, tube)
+				local tip = box("Warhead", Vector3.new(0.5, 0.5, 0.5), color, Vector3.new(-0.85 + ix * 1.7, -0.45 + iy * 0.9, -1.4), Enum.Material.Neon)
+				tip.Shape = Enum.PartType.Ball
+				tip.CanCollide = false
+				tip.Massless = true
+				weld(pod, tip)
+			end
+		end
+		model.PrimaryPart = pod
+	elseif kind == "armor" then
+		local panel = box("Panel", size, Color3.fromRGB(70, 74, 82), Vector3.zero, Enum.Material.DiamondPlate)
+		local trim = box("Trim", Vector3.new(size.X, 0.2, 0.3), color, Vector3.new(0, size.Y / 2 + 0.05, -size.Z / 2 + 0.15), Enum.Material.Neon)
+		trim.CanCollide = false
+		trim.Massless = true
+		weld(panel, trim)
+		for ix = -1, 1, 2 do
+			local rivet = box("Rivet", Vector3.new(0.35, 0.2, 0.35), Color3.fromRGB(30, 30, 34), Vector3.new(ix * (size.X / 2 - 0.5), size.Y / 2 + 0.05, 0.3), Enum.Material.Metal)
+			rivet.CanCollide = false
+			rivet.Massless = true
+			weld(panel, rivet)
+		end
+		if string.find(partId, "spiked", 1, true) then
+			for ix = -1, 1 do
+				local spike = Instance.new("WedgePart")
+				spike.Name = "Spike"
+				spike.Size = Vector3.new(0.5, 0.9, 1.4)
+				spike.Color = Color3.fromRGB(190, 190, 200)
+				spike.Material = Enum.Material.Metal
+				spike.CanCollide = false
+				spike.Massless = true
+				spike.CFrame = cf * CFrame.new(ix * 1.2, 0, -size.Z / 2 - 0.6) * CFrame.Angles(0, math.rad(90), 0)
+				spike.Parent = model
+				weld(panel, spike)
+			end
+		end
+		model.PrimaryPart = panel
+	elseif kind == "utility" then
+		local crate = box("Crate", Vector3.new(size.X, size.Y * 0.7, size.Z), Color3.fromRGB(50, 56, 50), Vector3.new(0, -size.Y * 0.15, 0), Enum.Material.Metal)
+		local tank = box("Tank", Vector3.new(1.4, 0.9, 0.9), color, Vector3.new(0, size.Y * 0.35 + 0.1, 0), Enum.Material.Neon)
+		tank.Shape = Enum.PartType.Cylinder
+		tank.CanCollide = false
+		tank.Massless = true
+		weld(crate, tank)
+		model.PrimaryPart = crate
 	elseif kind == "ram" then
 		local blade = Instance.new("WedgePart")
 		blade.Name = "Ram"

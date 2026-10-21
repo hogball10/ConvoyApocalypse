@@ -29,6 +29,8 @@ local EVENT_NAMES = {
 	"EnterGarage",
 	"JoinGarage",
 	"LeverResult",
+	"SelectLeverTarget",
+	"LeverTarget",
 	"PlaceBlock",
 	"RemoveBlock",
 }

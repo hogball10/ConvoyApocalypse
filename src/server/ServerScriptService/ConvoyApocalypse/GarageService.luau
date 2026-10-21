@@ -63,6 +63,24 @@ local function anchored(name: string, size: Vector3, color: Color3, cf: CFrame, 
 	return p
 end
 
+-- Items on the spinning frame. Eight fit a lever without crowding the corners.
+local REEL_SIZE = 8
+
+local function leverCost(kind: string): number
+	return Constants.LEVER_COSTS[kind] or 30
+end
+
+local setLeverSign: (Folder, string, string) -> ()
+
+local function leverTitle(kind: string): string
+	for _, entry in PartsCatalog.LeverKinds do
+		if entry.kind == kind then
+			return entry.title
+		end
+	end
+	return kind
+end
+
 local function buildGaragePad(host: Player, index: number): Folder
 	local root = ensureGaragesFolder()
 	local folder = Instance.new("Folder")
@@ -145,9 +163,8 @@ local function buildGaragePad(host: Player, index: number): Folder
 	-- Vehicle lift platform marking
 	anchored("LiftPad", Vector3.new(10, 0.2, 14), Color3.fromRGB(55, 55, 60), CFrame.new(origin + Vector3.new(0, 0.75, -4)), folder, Enum.Material.DiamondPlate)
 
-	local function buildLever(kind: string, side: number, title: string, cost: number, accentColor: Color3)
-		local targets = PartsCatalog.TargetsFor(kind)
-		local rootPos = origin + Vector3.new(side * 14, 0, -2)
+	local function buildLever(kind: string, xOffset: number, title: string, cost: number, accentColor: Color3)
+		local rootPos = origin + Vector3.new(xOffset, 0, -2)
 
 		local pedestal = anchored("LeverBase_" .. kind, Vector3.new(3.4, 1.4, 3.4), Color3.fromRGB(36, 36, 42), CFrame.new(rootPos + Vector3.new(0, 1.3, -2)), folder, Enum.Material.DiamondPlate)
 		pedestal:SetAttribute("LeverKind", kind)
@@ -174,7 +191,7 @@ local function buildGaragePad(host: Player, index: number): Folder
 		prompt.Parent = arm
 
 		local spinCenter = rootPos + Vector3.new(0, 9.2, 0.6)
-		local spinHalf = 6
+		local spinHalf = 5
 		arm:SetAttribute("SpinX", spinCenter.X)
 		arm:SetAttribute("SpinY", spinCenter.Y)
 		arm:SetAttribute("SpinZ", spinCenter.Z)
@@ -205,36 +222,7 @@ local function buildGaragePad(host: Player, index: number): Folder
 			GarageService.PullLever(player, kind)
 		end)
 
-		local count = #targets
-		for index, target in targets do
-			local xOff = (index - (count + 1) / 2) * 1.2
-			local chosen = (kind == "Parts" and target.id == "brick") or (kind == "Weapons" and target.id == "minigun")
-			local pad = anchored("Select_" .. target.id, Vector3.new(1.05, 0.28, 1.05), if chosen then Color3.fromRGB(255, 140, 50) else Color3.fromRGB(28, 28, 34), CFrame.new(rootPos + Vector3.new(xOff, 2.05, 0.4)), folder, Enum.Material.SmoothPlastic)
-			pad.CanCollide = false
-			pad:SetAttribute("LeverKind", kind)
-			pad:SetAttribute("TargetId", target.id)
-			local gui = Instance.new("SurfaceGui")
-			gui.Face = Enum.NormalId.Top
-			gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-			gui.PixelsPerStud = 50
-			gui.Parent = pad
-			local lbl = Instance.new("TextLabel")
-			lbl.Size = UDim2.fromScale(1, 1)
-			lbl.BackgroundTransparency = 1
-			lbl.Text = target.short
-			lbl.TextScaled = true
-			lbl.Font = Enum.Font.GothamBold
-			lbl.TextColor3 = Color3.fromRGB(235, 235, 240)
-			lbl.Parent = gui
-			local click = Instance.new("ClickDetector")
-			click.MaxActivationDistance = 18
-			click.Parent = pad
-			click.MouseClick:Connect(function(player)
-				GarageService.SelectTarget(player, kind, target.id)
-			end)
-		end
-
-		local sign = anchored("LeverSign_" .. kind, Vector3.new(5.2, 2.4, 0.25), Color3.fromRGB(16, 16, 20), CFrame.new(rootPos + Vector3.new(0, 5.1, 0.2)), folder, Enum.Material.SmoothPlastic)
+		local sign = anchored("LeverSign_" .. kind, Vector3.new(7.5, 3.4, 0.25), Color3.fromRGB(16, 16, 20), CFrame.new(rootPos + Vector3.new(0, 5.1, 0.2)), folder, Enum.Material.SmoothPlastic)
 		sign.CanCollide = false
 		local signGui = Instance.new("SurfaceGui")
 		signGui.Face = Enum.NormalId.Back
@@ -245,15 +233,16 @@ local function buildGaragePad(host: Player, index: number): Folder
 		status.Name = "StatusLabel"
 		status.Size = UDim2.fromScale(1, 1)
 		status.BackgroundTransparency = 1
-		status.Text = title .. "\nPull is free\nBuy " .. tostring(cost) .. " scrap\nCommon 55  Rare 27\nEpic 13  Legendary 5\nPull, then buy what lands"
+		status.Text = GarageService.LeverIdleText(kind, title, cost)
 		status.TextColor3 = accentColor
 		status.Font = Enum.Font.GothamBold
 		status.TextScaled = true
 		status.Parent = signGui
 	end
 
-	buildLever("Parts", -1, "CAR PARTS", Constants.LEVER_PART_COST, Color3.fromRGB(255, 150, 50))
-	buildLever("Weapons", 1, "WEAPONS", Constants.LEVER_WEAPON_COST, Color3.fromRGB(255, 70, 70))
+	for index, entry in PartsCatalog.LeverKinds do
+		buildLever(entry.kind, (index - 2.5) * 14, entry.title, leverCost(entry.kind), entry.color)
+	end
 
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "GarageSpawn"
@@ -583,34 +572,45 @@ function GarageService.GetOccupants(hostUserId: number): { number }
 	return list
 end
 
+-- What a lever's sign says between pulls: its name, the category it is set to
+-- roll, the price and the odds.
+function GarageService.LeverIdleText(kind: string, title: string, cost: number, targetId: string?): string
+	local target = PartsCatalog.FindTarget(kind, targetId or PartsCatalog.TargetsFor(kind)[1].id)
+	local odds = {}
+	for _, entry in Constants.RARITY_ODDS do
+		table.insert(odds, string.format("%s %d%%", entry.tier, entry.weight))
+	end
+	return string.format("%s\nRolling: %s\nBuy %d scrap\n%s", title, if target then target.label else "?", cost, table.concat(odds, "  "))
+end
+
 function GarageService.PlayerTargets(player: Player): { [string]: string }
 	local bag = GarageService._targets[player.UserId]
 	if not bag then
-		bag = { Parts = "brick", Weapons = "minigun" }
+		bag = { Body = "brick", Drive = "engine", Gear = "armor", Weapons = "minigun" }
 		GarageService._targets[player.UserId] = bag
 	end
 	return bag
 end
 
 function GarageService.SelectTarget(player: Player, kind: string, targetId: string)
+	if not PartsCatalog.IsLeverKind(kind) then
+		return
+	end
 	local target = PartsCatalog.FindTarget(kind, targetId)
 	if not target then
 		return
 	end
 	local bag = GarageService.PlayerTargets(player)
 	bag[kind] = targetId
+	Remotes.Event("LeverTarget"):FireClient(player, kind, targetId)
 	local hostId = GarageService._playerGarage[player.UserId]
 	local garage = hostId and GarageService._garages[hostId]
-	if not garage then
-		return
+	local state = hostId and GarageService._spins[hostId] and GarageService._spins[hostId][kind]
+	-- Don't overwrite the sign while a spin is running or an offer is waiting.
+	if garage and not (state and (state.busy or state.partId)) then
+		setLeverSign(garage.folder, kind, GarageService.LeverIdleText(kind, leverTitle(kind), leverCost(kind), targetId))
 	end
-	for _, desc in garage.folder:GetDescendants() do
-		if desc:IsA("BasePart") and desc:GetAttribute("LeverKind") == kind and string.sub(desc.Name, 1, 7) == "Select_" then
-			local selected = desc:GetAttribute("TargetId") == targetId
-			desc.Color = if selected then Color3.fromRGB(255, 140, 50) else Color3.fromRGB(28, 28, 34)
-		end
-	end
-	notify(player, "The lever spins every part. Pull is free")
+	notify(player, "Lever set to " .. target.label)
 end
 
 function GarageService.AnimateLever(folder: Folder, kind: string)
@@ -661,10 +661,6 @@ function GarageService.AnimateLever(folder: Folder, kind: string)
 	Debris:AddItem(drop, 1)
 end
 
-local function leverCost(kind: string): number
-	return if kind == "Weapons" then Constants.LEVER_WEAPON_COST else Constants.LEVER_PART_COST
-end
-
 local function spinBag(hostId: number, kind: string)
 	local all = GarageService._spins[hostId]
 	if not all then
@@ -679,7 +675,7 @@ local function spinBag(hostId: number, kind: string)
 	return state
 end
 
-local function setLeverSign(folder: Folder, kind: string, text: string)
+function setLeverSign(folder: Folder, kind: string, text: string)
 	local sign = folder:FindFirstChild("LeverSign_" .. kind, true)
 	local label = sign and sign:FindFirstChild("StatusLabel", true)
 	if label and label:IsA("TextLabel") then
@@ -827,8 +823,9 @@ function GarageService.PullLever(player: Player, kind: string)
 	end
 	GarageService._pullCooldown[player.UserId] = now
 
-	local targets = PartsCatalog.TargetsFor(kind)
-	if #targets == 0 then
+	local bag = GarageService.PlayerTargets(player)
+	local selected = PartsCatalog.FindTarget(kind, bag[kind] or "") or PartsCatalog.TargetsFor(kind)[1]
+	if not selected then
 		notify(player, "Nothing on this lever")
 		return
 	end
@@ -838,10 +835,12 @@ function GarageService.PullLever(player: Player, kind: string)
 		return
 	end
 
-	local winnerIndex = math.random(1, #targets)
-	local winnerTarget = targets[winnerIndex]
+	-- The reel only ever shows the selected category; the tiers on it are
+	-- decoration except for the one that lands.
+	local reelCount = REEL_SIZE
+	local winnerIndex = math.random(1, reelCount)
 	local tier = PartsCatalog.RollTier()
-	local partId = PartsCatalog.PartIdFor(winnerTarget.prefix, tier)
+	local partId = PartsCatalog.PartIdFor(selected.prefix, tier)
 	local part = PartsCatalog.Get(partId)
 	if not part then
 		notify(player, "That part is missing from the catalog")
@@ -862,14 +861,14 @@ function GarageService.PullLever(player: Player, kind: string)
 
 	local folder = garage.folder
 	local landingT = 0.625
-	local base = (winnerIndex - 1) / #targets
+	local base = (winnerIndex - 1) / reelCount
 	local extra = (landingT - base) % 1
 	local travelEnd = 2 + extra
 	local duration = 2.8
 	local models = {}
-	for index, target in targets do
-		local shownId = if index == winnerIndex then partId else PartsCatalog.PartIdFor(target.prefix, "Common")
-		local pos = squarePoint(center, half, (index - 1) / #targets)
+	for index = 1, reelCount do
+		local shownId = if index == winnerIndex then partId else PartsCatalog.PartIdFor(selected.prefix, PartsCatalog.RollTier())
+		local pos = squarePoint(center, half, (index - 1) / reelCount)
 		table.insert(models, showBlock(shownId, CFrame.new(pos), folder))
 	end
 
@@ -889,7 +888,7 @@ function GarageService.PullLever(player: Player, kind: string)
 			local travel = eased * travelEnd
 			for index, model in models do
 				if model.Parent then
-					local pos = squarePoint(center, half, (index - 1) / #targets + travel)
+					local pos = squarePoint(center, half, (index - 1) / reelCount + travel)
 					moveBlock(model, CFrame.new(pos))
 				end
 			end
@@ -1014,8 +1013,21 @@ function GarageService.Init()
 		end
 	end)
 
+	Remotes.Event("SelectLeverTarget").OnServerEvent:Connect(function(player, kind, targetId)
+		if typeof(kind) ~= "string" or typeof(targetId) ~= "string" then
+			return
+		end
+		GarageService.SelectTarget(player, kind, targetId)
+	end)
+
 	Remotes.Event("UnlockPart").OnServerEvent:Connect(function(player, partId: string)
 		if typeof(partId) ~= "string" then
+			return
+		end
+		-- Parts that cost nothing to "unlock" are lever drops; letting the remote
+		-- hand them out would skip the lever entirely.
+		local def = PartsCatalog.Get(partId)
+		if not def or def.unlockCost <= 0 then
 			return
 		end
 		local ok, err = DataService.UnlockPart(player, partId)

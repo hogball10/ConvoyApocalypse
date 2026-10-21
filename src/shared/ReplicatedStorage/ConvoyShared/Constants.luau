@@ -33,10 +33,26 @@ Constants.RAM_DAMAGE = 40
 Constants.RAM_SELF_DAMAGE = 5
 Constants.OVERWHELM_GRACE = 4 -- seconds without fuel before overwhelm ends run
 
+-- Progression
+Constants.XP_PER_METERS = 10 -- 1 xp per this many meters
+Constants.XP_PER_KILL = 2
+Constants.XP_PER_BOSS = 100
+Constants.BOSS_SCRAP = 150
+Constants.LEVEL_UP_SCRAP = 100 -- per new level reached
+
+function Constants.XpToNext(level: number): number
+	return 100 + (level - 1) * 60
+end
+
 -- Garage
 Constants.STARTING_SCRAP = 5000
-Constants.LEVER_PART_COST = 20
-Constants.LEVER_WEAPON_COST = 35
+-- Scrap to buy what a lever landed on. Pulling is free.
+Constants.LEVER_COSTS = {
+	Body = 15,
+	Drive = 30,
+	Gear = 35,
+	Weapons = 35,
+}
 Constants.STARTING_SLOTS = 1
 Constants.MAX_SLOTS = 4
 Constants.SLOT_UNLOCK_COSTS = { 0, 200, 500, 1000 }
@@ -46,20 +62,22 @@ Constants.TRADE_TIMEOUT = 60
 
 -- Lever rolls. Weights are relative chances.
 Constants.RARITY_ODDS = {
-	{ tier = "Common", weight = 55 },
+	{ tier = "Common", weight = 52 },
 	{ tier = "Rare", weight = 27 },
 	{ tier = "Epic", weight = 13 },
-	{ tier = "Legendary", weight = 5 },
+	{ tier = "Legendary", weight = 6 },
+	{ tier = "Mythic", weight = 2 },
 }
 
 -- Tiers
-Constants.TIERS = { "Scrap", "Common", "Rare", "Epic", "Legendary" }
+Constants.TIERS = { "Scrap", "Common", "Rare", "Epic", "Legendary", "Mythic" }
 Constants.TIER_COLORS = {
 	Scrap = Color3.fromRGB(140, 140, 140),
 	Common = Color3.fromRGB(180, 200, 220),
 	Rare = Color3.fromRGB(70, 140, 255),
 	Epic = Color3.fromRGB(170, 70, 255),
 	Legendary = Color3.fromRGB(255, 170, 40),
+	Mythic = Color3.fromRGB(255, 60, 120),
 }
 
 return Constants
