@@ -1,18 +1,18 @@
-{
+﻿{
   "version": 1,
-  "generated": true,
+  "generated": false,
   "roots": [
     {
       "instance": "StarterPlayer.StarterPlayerScripts",
-      "disk": "src/client"
+      "disk": "src/client/StarterPlayerScripts"
     },
     {
       "instance": "ServerScriptService",
-      "disk": "src/server"
+      "disk": "src/server/ServerScriptService"
     },
     {
       "instance": "ReplicatedStorage",
-      "disk": "src/shared"
+      "disk": "src/shared/ReplicatedStorage"
     }
   ]
 }
