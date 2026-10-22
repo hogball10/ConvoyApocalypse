@@ -154,6 +154,32 @@ function DataService.Init()
 	end
 end
 
+-- What the Tab player list shows: Roblox draws every IntValue in a player's
+-- "leaderstats" folder as a column.
+local function updateLeaderstats(player: Player)
+	local profile = DataService._profiles[player.UserId]
+	if not profile then
+		return
+	end
+	local stats = player:FindFirstChild("leaderstats")
+	if not stats then
+		stats = Instance.new("Folder")
+		stats.Name = "leaderstats"
+		stats.Parent = player
+	end
+	for name, value in { ["Scrap"] = profile.scrap, ["Max Distance"] = profile.highScore } do
+		local entry = stats:FindFirstChild(name) :: IntValue?
+		if not entry then
+			entry = Instance.new("IntValue")
+			entry.Name = name
+			entry.Parent = stats
+		end
+		if entry and entry.Value ~= value then
+			entry.Value = value
+		end
+	end
+end
+
 function DataService.Load(player: Player)
 	local profile = defaultProfile()
 	if DataService._store then
@@ -185,6 +211,7 @@ function DataService.Load(player: Player)
 	end
 
 	DataService._profiles[player.UserId] = profile
+	updateLeaderstats(player)
 	Remotes.Event("DataUpdated"):FireClient(player, DataService.GetPublic(player))
 end
 
@@ -235,6 +262,7 @@ function DataService.ClearPasses(player: Player)
 end
 
 function DataService.Replicate(player: Player)
+	updateLeaderstats(player)
 	local public = DataService.GetPublic(player)
 	if public then
 		Remotes.Event("DataUpdated"):FireClient(player, public)
