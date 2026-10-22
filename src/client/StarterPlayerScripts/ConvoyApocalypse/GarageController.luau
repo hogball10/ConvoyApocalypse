@@ -138,6 +138,48 @@ local function statLine(part: any): string
 	return table.concat(bits, "   ")
 end
 
+-- A spinning-free 3D thumbnail of a part. The model is built once per part and
+-- cloned, since the list is rebuilt on every data update.
+local previewModels: { [string]: Model } = {}
+
+local function addPreview(parent: GuiObject, partId: string, tierColor: Color3)
+	local view = Instance.new("ViewportFrame")
+	view.Name = "Preview"
+	view.Size = UDim2.new(1, -8, 0, 78)
+	view.Position = UDim2.fromOffset(4, 4)
+	view.BackgroundColor3 = tierColor:Lerp(Color3.fromRGB(14, 16, 20), 0.82)
+	view.BorderSizePixel = 0
+	view.Ambient = Color3.fromRGB(150, 150, 160)
+	view.LightColor = Color3.fromRGB(255, 255, 255)
+	view.LightDirection = Vector3.new(-1, -1.5, -0.8)
+	view.Parent = parent
+	local viewCorner = Instance.new("UICorner")
+	viewCorner.CornerRadius = UDim.new(0, 5)
+	viewCorner.Parent = view
+
+	local template = previewModels[partId]
+	if not template then
+		template = BlockBuilder.Create(partId, CFrame.new())
+		for _, desc in template:GetDescendants() do
+			if desc:IsA("BasePart") then
+				desc.Anchored = true
+				desc.CanCollide = false
+			end
+		end
+		previewModels[partId] = template
+	end
+	local model = template:Clone()
+	model.Parent = view
+
+	local boxCf, boxSize = model:GetBoundingBox()
+	local camera = Instance.new("Camera")
+	camera.FieldOfView = 35
+	local distance = boxSize.Magnitude / (2 * math.tan(math.rad(camera.FieldOfView / 2))) * 0.9 + 0.5
+	camera.CFrame = CFrame.lookAt(boxCf.Position + Vector3.new(1, 0.75, 1.3).Unit * distance, boxCf.Position)
+	camera.Parent = view
+	view.CurrentCamera = camera
+end
+
 local refreshInventory: () -> ()
 
 refreshInventory = function()
@@ -190,73 +232,101 @@ refreshInventory = function()
 		empty.Parent = inventoryScroll
 		return
 	end
-	local lastCategory = ""
 	local order = 0
+	local section: Frame? = nil
+	local lastCategory = ""
 	for _, row in rows do
-		if inventoryFilter == nil and row.part.category ~= lastCategory then
+		if section == nil or (inventoryFilter == nil and row.part.category ~= lastCategory) then
 			lastCategory = row.part.category
+			if inventoryFilter == nil then
+				order += 1
+				local header = Instance.new("TextLabel")
+				header.LayoutOrder = order
+				header.BackgroundTransparency = 1
+				header.Size = UDim2.new(1, 0, 0, 20)
+				header.Font = Enum.Font.GothamBlack
+				header.TextSize = 12
+				header.TextXAlignment = Enum.TextXAlignment.Left
+				header.TextColor3 = UIUtil.Colors.Accent
+				header.Text = string.upper(PartsCatalog.SocketLabel[lastCategory] or lastCategory)
+				header.Parent = inventoryScroll
+			end
 			order += 1
-			local header = Instance.new("TextLabel")
-			header.LayoutOrder = order
-			header.BackgroundTransparency = 1
-			header.Size = UDim2.new(1, 0, 0, 20)
-			header.Font = Enum.Font.GothamBlack
-			header.TextSize = 12
-			header.TextXAlignment = Enum.TextXAlignment.Left
-			header.TextColor3 = UIUtil.Colors.Accent
-			header.Text = string.upper(PartsCatalog.SocketLabel[lastCategory] or lastCategory)
-			header.Parent = inventoryScroll
+			local grid = Instance.new("Frame")
+			grid.LayoutOrder = order
+			grid.BackgroundTransparency = 1
+			grid.Size = UDim2.new(1, 0, 0, 0)
+			grid.AutomaticSize = Enum.AutomaticSize.Y
+			grid.Parent = inventoryScroll
+			local layout = Instance.new("UIGridLayout")
+			layout.CellSize = UDim2.new(0.5, -3, 0, 134)
+			layout.CellPadding = UDim2.fromOffset(6, 6)
+			layout.SortOrder = Enum.SortOrder.LayoutOrder
+			layout.Parent = grid
+			section = grid
 		end
 		order += 1
+		local held = GarageController._holdId == row.id
 		local tierColor = Constants.TIER_COLORS[row.part.tier] or UIUtil.Colors.Accent
 		local button = Instance.new("TextButton")
 		button.Name = row.id
 		button.LayoutOrder = order
-		button.Size = UDim2.new(1, 0, 0, 48)
-		button.BackgroundColor3 = if GarageController._holdId == row.id then UIUtil.Colors.AccentDim else UIUtil.Colors.PanelAlt
+		button.BackgroundColor3 = if held then UIUtil.Colors.AccentDim else UIUtil.Colors.PanelAlt
 		button.BorderSizePixel = 0
 		button.AutoButtonColor = true
 		button.Text = ""
-		button.Parent = inventoryScroll
+		button.Parent = section
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, 6)
 		corner.Parent = button
-		local stripe = Instance.new("Frame")
-		stripe.Size = UDim2.new(0, 5, 1, -8)
-		stripe.Position = UDim2.fromOffset(4, 4)
-		stripe.BackgroundColor3 = tierColor
-		stripe.BorderSizePixel = 0
-		stripe.Parent = button
+		local outline = Instance.new("UIStroke")
+		outline.Color = tierColor
+		outline.Thickness = if held then 2.5 else 1.5
+		outline.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		outline.Parent = button
+
+		addPreview(button, row.id, tierColor)
+
 		local name = Instance.new("TextLabel")
 		name.BackgroundTransparency = 1
-		name.Position = UDim2.fromOffset(16, 3)
-		name.Size = UDim2.new(1, -64, 0, 22)
+		name.Position = UDim2.fromOffset(6, 84)
+		name.Size = UDim2.new(1, -12, 0, 18)
 		name.Font = Enum.Font.GothamBold
-		name.TextSize = 14
+		name.TextSize = 13
 		name.TextXAlignment = Enum.TextXAlignment.Left
+		name.TextTruncate = Enum.TextTruncate.AtEnd
 		name.TextColor3 = tierColor
 		name.Text = row.part.name
 		name.Parent = button
 		local detail = Instance.new("TextLabel")
 		detail.BackgroundTransparency = 1
-		detail.Position = UDim2.fromOffset(16, 25)
-		detail.Size = UDim2.new(1, -64, 0, 18)
+		detail.Position = UDim2.fromOffset(6, 102)
+		detail.Size = UDim2.new(1, -12, 0, 28)
 		detail.Font = Enum.Font.Gotham
-		detail.TextSize = 11
+		detail.TextSize = 10
+		detail.TextWrapped = true
 		detail.TextXAlignment = Enum.TextXAlignment.Left
+		detail.TextYAlignment = Enum.TextYAlignment.Top
 		detail.TextColor3 = UIUtil.Colors.Muted
-		detail.Text = row.part.tier .. "  ·  " .. statLine(row.part)
+		detail.Text = statLine(row.part)
 		detail.Parent = button
+		-- Stack count over the corner of the preview.
 		local count = Instance.new("TextLabel")
-		count.BackgroundTransparency = 1
 		count.AnchorPoint = Vector2.new(1, 0)
-		count.Position = UDim2.new(1, -8, 0, 0)
-		count.Size = UDim2.fromOffset(36, 48)
+		count.Position = UDim2.new(1, -8, 0, 8)
+		count.Size = UDim2.fromOffset(30, 18)
+		count.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
+		count.BackgroundTransparency = 0.25
+		count.BorderSizePixel = 0
+		count.ZIndex = 3
 		count.Font = Enum.Font.GothamBold
-		count.TextSize = 14
+		count.TextSize = 12
 		count.TextColor3 = UIUtil.Colors.Scrap
 		count.Text = "x" .. tostring(row.left)
 		count.Parent = button
+		local countCorner = Instance.new("UICorner")
+		countCorner.CornerRadius = UDim.new(0, 4)
+		countCorner.Parent = count
 		button.MouseButton1Click:Connect(function()
 			holdPart(row.id)
 			refreshInventory()
