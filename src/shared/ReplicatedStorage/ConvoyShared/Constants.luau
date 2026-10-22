@@ -20,8 +20,8 @@ Constants.BASE_ACCEL = 20
 Constants.BASE_HANDLING = 1
 Constants.BASE_WEIGHT_CAP = 100
 -- Fuel is spent per metre driven, so a tank's capacity is its range. The
--- starter tank (140 fuel) is good for exactly 1000 m.
-Constants.FUEL_PER_METER = 0.14
+-- starter tank (140 fuel) is good for exactly 500 m.
+Constants.FUEL_PER_METER = 0.28
 -- Sitting still still burns a little, so a stalled run cannot last forever.
 Constants.IDLE_FUEL_DRAIN = 0.15
 -- Fraction of the tank a fuel pickup refills.
@@ -55,7 +55,7 @@ function Constants.XpToNext(level: number): number
 end
 
 -- Garage
-Constants.STARTING_SCRAP = 5000
+Constants.STARTING_SCRAP = 100
 -- Scrap to buy what a lever landed on. Pulling is free.
 Constants.LEVER_COSTS = {
 	Body = 15,
