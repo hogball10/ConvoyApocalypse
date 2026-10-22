@@ -7,22 +7,28 @@ local Lighting = game:GetService("Lighting")
 
 local WorldTheme = {}
 
+-- Always midday. The clock never moves and no biome changes it, so every
+-- player sees the same bright sky wherever they are in a run.
+local DAYLIGHT_CLOCK = 13
+
+local DAY_AMBIENT = Color3.fromRGB(120, 118, 112)
+
 function WorldTheme.Apply()
-	Lighting.Brightness = 1.6
-	Lighting.Ambient = Color3.fromRGB(55, 48, 42)
-	Lighting.OutdoorAmbient = Color3.fromRGB(70, 58, 48)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 160, 90)
-	Lighting.ColorShift_Bottom = Color3.fromRGB(40, 30, 25)
+	Lighting.Brightness = 2.4
+	Lighting.Ambient = DAY_AMBIENT
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 135, 125)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 235, 200)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(60, 55, 50)
 	Lighting.EnvironmentDiffuseScale = 0.55
 	Lighting.EnvironmentSpecularScale = 0.4
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.35
-	Lighting.ClockTime = 17.4
+	Lighting.ClockTime = DAYLIGHT_CLOCK
 	Lighting.GeographicLatitude = 25
 	Lighting.ExposureCompensation = 0.15
-	Lighting.FogColor = Color3.fromRGB(120, 95, 70)
-	Lighting.FogStart = 80
-	Lighting.FogEnd = 520
+	Lighting.FogColor = Color3.fromRGB(190, 175, 150)
+	Lighting.FogStart = 120
+	Lighting.FogEnd = 650
 
 	for _, name in { "Atmosphere", "Sky", "Bloom", "ColorCorrection", "SunRays", "DepthOfField" } do
 		local old = Lighting:FindFirstChild(name)
@@ -33,12 +39,12 @@ function WorldTheme.Apply()
 
 	local atmosphere = Instance.new("Atmosphere")
 	atmosphere.Name = "Atmosphere"
-	atmosphere.Density = 0.32
+	atmosphere.Density = 0.22
 	atmosphere.Offset = 0.15
-	atmosphere.Color = Color3.fromRGB(160, 120, 90)
-	atmosphere.Decay = Color3.fromRGB(90, 55, 35)
-	atmosphere.Glare = 0.25
-	atmosphere.Haze = 1.8
+	atmosphere.Color = Color3.fromRGB(190, 190, 200)
+	atmosphere.Decay = Color3.fromRGB(150, 130, 110)
+	atmosphere.Glare = 0.1
+	atmosphere.Haze = 0.9
 	atmosphere.Parent = Lighting
 
 	local sky = Instance.new("Sky")
@@ -61,36 +67,31 @@ function WorldTheme.Apply()
 	cc.Brightness = 0.02
 	cc.Contrast = 0.18
 	cc.Saturation = 0.05
-	cc.TintColor = Color3.fromRGB(255, 235, 210)
+	cc.TintColor = Color3.fromRGB(255, 248, 238)
 	cc.Parent = Lighting
 
 	local sunRays = Instance.new("SunRaysEffect")
 	sunRays.Name = "SunRays"
-	sunRays.Intensity = 0.08
+	sunRays.Intensity = 0.05
 	sunRays.Spread = 0.6
 	sunRays.Parent = Lighting
 
 end
 
+-- Biomes differ by fog only; the time of day stays put.
 function WorldTheme.SetBiome(biome: string)
 	if biome == "RuinedCity" then
-		Lighting.FogColor = Color3.fromRGB(70, 75, 85)
-		Lighting.FogEnd = 420
-		Lighting.ClockTime = 18.2
-	elseif biome == "Desert" then
-		Lighting.FogColor = Color3.fromRGB(210, 180, 120)
-		Lighting.FogEnd = 600
-		Lighting.ClockTime = 15.5
-	elseif biome == "SnowyMountains" then
-		Lighting.FogColor = Color3.fromRGB(180, 200, 220)
-		Lighting.FogEnd = 480
-		Lighting.ClockTime = 14
-		Lighting.Ambient = Color3.fromRGB(70, 80, 95)
-	else -- WastelandHighways
-		Lighting.FogColor = Color3.fromRGB(120, 95, 70)
+		Lighting.FogColor = Color3.fromRGB(150, 155, 165)
 		Lighting.FogEnd = 520
-		Lighting.ClockTime = 17.4
-		Lighting.Ambient = Color3.fromRGB(55, 48, 42)
+	elseif biome == "Desert" then
+		Lighting.FogColor = Color3.fromRGB(225, 195, 140)
+		Lighting.FogEnd = 700
+	elseif biome == "SnowyMountains" then
+		Lighting.FogColor = Color3.fromRGB(200, 215, 230)
+		Lighting.FogEnd = 580
+	else -- WastelandHighways
+		Lighting.FogColor = Color3.fromRGB(190, 175, 150)
+		Lighting.FogEnd = 650
 	end
 end
 
