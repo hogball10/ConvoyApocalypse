@@ -4,6 +4,18 @@
 	Permanent unlocks — once unlocked, equip anytime.
 ]]
 
+-- One gun on the car: what it fires and where it is bolted on (block centre,
+-- in the car's own space).
+export type WeaponMount = {
+	partId: string,
+	kind: string,
+	damage: number,
+	fireRate: number,
+	x: number,
+	y: number,
+	z: number,
+}
+
 export type PartDef = {
 	id: string,
 	name: string,
@@ -62,6 +74,9 @@ PartsCatalog.StarterBlocks = {
 	{ partId = "wheels_common", x = -4, y = 0, z = 2, rot = 0 },
 	{ partId = "wheels_common", x = 4, y = 0, z = 2, rot = 0 },
 }
+
+-- Guns that fire at once. Extra weapons past this still weigh the car down.
+PartsCatalog.MAX_MOUNTED_WEAPONS = 12
 
 PartsCatalog.RequiredToRun = { "Engine", "Wheels", "FuelTank", "Seat" }
 
@@ -866,6 +881,7 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 	shieldRegen: number,
 	fuelPerKill: number,
 	weaponKind: string,
+	weapons: { WeaponMount },
 	overweight: boolean,
 }
 	local stats = {
@@ -890,6 +906,7 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 		shieldRegen = 0,
 		fuelPerKill = 0,
 		weaponKind = "",
+		weapons = {},
 		overweight = false,
 	}
 
@@ -1125,9 +1142,30 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 	local best: { [string]: PartDef } = {}
 	local extraHealth = 0
 	local extraWeight = 0
+	local mounts: { WeaponMount } = {}
+	local weaponWeight = 0
+	local strongestRam = 0
 	for _, block in blocks do
 		local part = PartsCatalog.Get(block.partId)
 		if part then
+			if part.category == "Weapon" then
+				-- Every weapon on the car fires and weighs, not just the best one.
+				weaponWeight += part.weight
+				strongestRam = math.max(strongestRam, part.stats.ramDamage or 0)
+				local damage, rate = part.stats.gunDamage or 0, part.stats.fireRate or 0
+				if damage > 0 and rate > 0 then
+					local size = PartsCatalog.BlockSize(block.partId, block.rot)
+					table.insert(mounts, {
+						partId = block.partId,
+						kind = PartsCatalog.BlockKind(block.partId),
+						damage = damage,
+						fireRate = rate,
+						x = block.x,
+						y = block.y + size.Y / 2,
+						z = block.z,
+					})
+				end
+			end
 			if part.category == "Block" then
 				extraHealth += part.stats.health or 0
 				extraWeight += part.weight
@@ -1157,6 +1195,19 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 			stats.accel /= penalty
 			stats.handling /= penalty
 		end
+	end
+	-- The best weapon's weight is already in the loadout; add the rest.
+	extraWeight += weaponWeight - (if best.Weapon then best.Weapon.weight else 0)
+	-- Too many guns would cost the server more than they are worth.
+	table.sort(mounts, function(a, b)
+		return a.damage * a.fireRate > b.damage * b.fireRate
+	end)
+	while #mounts > PartsCatalog.MAX_MOUNTED_WEAPONS do
+		table.remove(mounts)
+	end
+	stats.weapons = mounts
+	if best.Weapon then
+		stats.ramDamage = strongestRam
 	end
 	stats.weight += extraWeight
 	stats.health += extraHealth

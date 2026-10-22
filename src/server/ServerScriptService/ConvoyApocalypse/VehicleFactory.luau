@@ -7,6 +7,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("ConvoyShared")
 local PartsCatalog = require(Shared:WaitForChild("PartsCatalog"))
+local HttpService = game:GetService("HttpService")
 local BlockBuilder = require(Shared:WaitForChild("BlockBuilder"))
 
 local VehicleFactory = {}
@@ -126,6 +127,7 @@ function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: 
 	model:SetAttribute("PickupMult", stats.pickupMult)
 	model:SetAttribute("ScrapMult", stats.scrapMult)
 	model:SetAttribute("WeaponKind", stats.weaponKind)
+	model:SetAttribute("WeaponsJson", HttpService:JSONEncode(stats.weapons))
 	model:SetAttribute("MaxShield", stats.shieldMax)
 	model:SetAttribute("Shield", stats.shieldMax)
 	model:SetAttribute("ShieldRegen", stats.shieldRegen)

@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local HttpService = game:GetService("HttpService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("ConvoyShared")
@@ -75,7 +76,8 @@ local ROAD_HALF_WIDTH = 13
 local lastPositions: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
 
 -- Fractional shots carried over between frames, per car.
-local fireCharge: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local fireCharge: { [Model]: { [number]: number } } = setmetatable({}, { __mode = "k" }) :: any
+local mountCache: { [Model]: { key: string, mounts: { any } } } = setmetatable({}, { __mode = "k" }) :: any
 local MAX_SHOTS_PER_FRAME = 4
 
 -- A client input older than this is ignored (the player released everything or
@@ -630,6 +632,43 @@ end
 
 -- Live zombies as (model, position-in-vehicle-space) so each weapon only has to
 -- describe its own targeting shape.
+-- The guns on a car, decoded once from the JSON the factory stored. A car with
+-- no mount list but a gun stat (a hand-set test car) gets one centred gun.
+local function mountsOf(vehicle: Model): { any }
+	local raw = vehicle:GetAttribute("WeaponsJson")
+	local damage = (vehicle:GetAttribute("GunDamage") :: number?) or 0
+	local rate = (vehicle:GetAttribute("FireRate") :: number?) or 0
+	-- Re-decode only when the stored weapons actually change.
+	local key = tostring(raw) .. "|" .. tostring(damage) .. "|" .. tostring(rate) .. "|" .. tostring(vehicle:GetAttribute("WeaponKind"))
+	local cached = mountCache[vehicle]
+	if cached and cached.key == key then
+		return cached.mounts
+	end
+	local mounts: { any } = {}
+	if typeof(raw) == "string" then
+		local ok, decoded = pcall(function()
+			return HttpService:JSONDecode(raw)
+		end)
+		if ok and typeof(decoded) == "table" then
+			mounts = decoded
+		end
+	end
+	if #mounts == 0 and damage > 0 and rate > 0 then
+		mounts = {
+			{
+				kind = (vehicle:GetAttribute("WeaponKind") :: string?) or "minigun",
+				damage = damage,
+				fireRate = rate,
+				x = 0,
+				y = 2,
+				z = 0,
+			},
+		}
+	end
+	mountCache[vehicle] = { key = key, mounts = mounts }
+	return mounts
+end
+
 local function targets(session: RunSession, body: BasePart): { { model: Model, rel: Vector3, pos: Vector3 } }
 	local list = {}
 	for _, zombie in session.zombieFolder:GetChildren() do
@@ -645,7 +684,7 @@ end
 local function inFront(list, minZ: number, maxZ: number, halfWidth: number)
 	local out = {}
 	for _, t in list do
-		if t.rel.Z < -minZ and t.rel.Z > -maxZ and math.abs(t.rel.X) < halfWidth then
+		if t.model.Parent and t.rel.Z < -minZ and t.rel.Z > -maxZ and math.abs(t.rel.X) < halfWidth then
 			table.insert(out, t)
 		end
 	end
@@ -655,11 +694,15 @@ local function inFront(list, minZ: number, maxZ: number, halfWidth: number)
 	return out
 end
 
-local function fireWeapon(session: RunSession, participant: Participant, body: BasePart, damage: number)
-	local kind = participant.vehicle:GetAttribute("WeaponKind")
-	local muzzle = body.Position + Vector3.new(0, 2.5, 0)
-	local all = targets(session, body)
-
+local function fireWeapon(
+	session: RunSession,
+	participant: Participant,
+	body: BasePart,
+	damage: number,
+	kind: string,
+	muzzle: Vector3,
+	all: { { model: Model, rel: Vector3, pos: Vector3 } }
+)
 	if kind == "tesla" then
 		-- Arcs to the nearest zombie, then chains to up to three neighbours.
 		local first = inFront(all, 2, 55, 20)[1]
@@ -1140,17 +1183,29 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 			participant.overwhelmTimer = 0
 		end
 
-		-- Auto weapon: each kind fires differently (see fireWeapon)
-		local gunDamage = vehicle:GetAttribute("GunDamage") :: number
-		local fireRate = vehicle:GetAttribute("FireRate") :: number
-		if gunDamage > 0 and fireRate > 0 and fuel > 0 then
-			-- Charge builds at fireRate per second and each whole point is a
-			-- shot, so fast guns really fire fast whatever the frame rate.
-			local charge = (fireCharge[vehicle] or 0) + fireRate * dt
-			local shots = math.min(math.floor(charge), MAX_SHOTS_PER_FRAME)
-			fireCharge[vehicle] = if shots >= MAX_SHOTS_PER_FRAME then 0 else charge - shots
-			for _ = 1, shots do
-				fireWeapon(session, participant, body, gunDamage)
+		-- Every mounted weapon fires on its own timer; each kind fires
+		-- differently (see fireWeapon).
+		if fuel > 0 then
+			local mounts = mountsOf(vehicle)
+			local live = nil
+			local charges = fireCharge[vehicle]
+			if not charges then
+				charges = {}
+				fireCharge[vehicle] = charges
+			end
+			for index, mount in mounts do
+				-- Charge builds at fireRate per second and each whole point is a
+				-- shot, so fast guns really fire fast whatever the frame rate.
+				local charge = (charges[index] or 0) + mount.fireRate * dt
+				local shots = math.min(math.floor(charge), MAX_SHOTS_PER_FRAME)
+				charges[index] = if shots >= MAX_SHOTS_PER_FRAME then 0 else charge - shots
+				if shots > 0 then
+					live = live or targets(session, body)
+					local muzzle = body.CFrame:PointToWorldSpace(Vector3.new(mount.x, mount.y + 0.5, mount.z - 1))
+					for _ = 1, shots do
+						fireWeapon(session, participant, body, mount.damage, mount.kind, muzzle, live)
+					end
+				end
 			end
 		end
 	end
