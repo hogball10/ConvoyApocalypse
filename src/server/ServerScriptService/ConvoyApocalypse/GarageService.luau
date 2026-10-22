@@ -1063,6 +1063,19 @@ function GarageService.Init()
 		GarageService.ReturnToGarage(player)
 	end)
 
+	Remotes.Event("BuyBoost").OnServerEvent:Connect(function(player, itemId)
+		if typeof(itemId) ~= "string" then
+			return
+		end
+		local ok, err = DataService.BuyBoost(player, itemId)
+		local item = Constants.ShopItem(itemId)
+		if ok and item then
+			notify(player, "Bought " .. item.name)
+		elseif err then
+			notify(player, err)
+		end
+	end)
+
 	Remotes.Event("SelectLeverTarget").OnServerEvent:Connect(function(player, kind, targetId)
 		if typeof(kind) ~= "string" or typeof(targetId) ~= "string" then
 			return

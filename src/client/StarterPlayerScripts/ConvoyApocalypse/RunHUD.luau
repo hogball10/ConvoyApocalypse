@@ -185,6 +185,9 @@ function RunHUD.Update(state: any)
 			table.insert(lines, string.format("Juggernauts: %d  (+%d scrap)", state.bossKills, state.bossScrap or 0))
 		end
 		table.insert(lines, string.format("Pickups: %d", state.pickups or 0))
+		if state.boosts and #state.boosts > 0 then
+			table.insert(lines, "Boosts used: " .. table.concat(state.boosts, ", "))
+		end
 		table.insert(lines, string.format("Total scrap: %d    XP: +%d", state.scrapEarned or 0, state.xpEarned or 0))
 		if (state.levelsGained or 0) > 0 then
 			table.insert(lines, string.format("LEVEL UP! Now level %d", state.level or 1))

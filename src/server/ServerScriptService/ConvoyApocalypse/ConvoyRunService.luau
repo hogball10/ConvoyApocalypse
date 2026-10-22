@@ -793,6 +793,31 @@ function ConvoyRunService.BindVehicle(session: RunSession, participant: Particip
 	end)
 end
 
+-- Shop boosts become vehicle stats for this run; they are used up in EndRun.
+local function applyBoosts(player: Player, vehicle: Model)
+	local fuelMult = DataService.BoostEffect(player, "fuelMult")
+	if fuelMult ~= 1 then
+		local maxFuel = (vehicle:GetAttribute("MaxFuel") :: number) * fuelMult
+		vehicle:SetAttribute("MaxFuel", maxFuel)
+		vehicle:SetAttribute("Fuel", maxFuel)
+	end
+	local healthMult = DataService.BoostEffect(player, "healthMult")
+	if healthMult ~= 1 then
+		local maxHealth = (vehicle:GetAttribute("MaxHealth") :: number) * healthMult
+		vehicle:SetAttribute("MaxHealth", maxHealth)
+		vehicle:SetAttribute("Health", maxHealth)
+	end
+	local pickupMult = DataService.BoostEffect(player, "pickupMult")
+	vehicle:SetAttribute("PickupMult", ((vehicle:GetAttribute("PickupMult") :: number?) or 1) * pickupMult)
+	local scrapMult = DataService.BoostEffect(player, "scrapMult")
+	vehicle:SetAttribute("ScrapMult", ((vehicle:GetAttribute("ScrapMult") :: number?) or 1) * scrapMult)
+
+	local active = DataService.ActiveBoostNames(player)
+	if #active > 0 then
+		notify(player, "Boosts active: " .. table.concat(active, ", "))
+	end
+end
+
 function ConvoyRunService.Start(host: Player)
 	if ConvoyRunService._playerRun[host.UserId] then
 		notify(host, "Already in a run")
@@ -836,6 +861,7 @@ function ConvoyRunService.Start(host: Player)
 
 	local spawnCF = CFrame.new(0, 0.6, 0)
 	local vehicle = VehicleFactory.Create(host, blocks, spawnCF)
+	applyBoosts(host, vehicle)
 	vehicle.Parent = vehiclesFolder
 
 	seatDriver(host, vehicle)
@@ -916,6 +942,7 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 	local vehiclesFolder = session.roadFolder.Parent:FindFirstChild("Vehicles_" .. session.id) :: Folder
 	local spawnCF = CFrame.new(offset, 0.6, -session.distance)
 	local vehicle = VehicleFactory.Create(player, blocks, spawnCF)
+	applyBoosts(player, vehicle)
 	vehicle.Parent = vehiclesFolder
 
 	seatDriver(player, vehicle)
@@ -1192,11 +1219,14 @@ function ConvoyRunService.EndRun(session: RunSession)
 		local xp = math.floor(distance / Constants.XP_PER_METERS)
 			+ participant.kills * Constants.XP_PER_KILL
 			+ participant.bossKills * Constants.XP_PER_BOSS
+		xp = math.floor(xp * DataService.BoostEffect(participant.player, "xpMult"))
+		local boostNames = DataService.ActiveBoostNames(participant.player)
 		local previous = DataService.Get(participant.player)
 		local isRecord = previous ~= nil and distance > previous.highScore
 		DataService.AddScrap(participant.player, total)
 		DataService.UpdateHighScore(participant.player, distance)
 		local level, levelsGained = DataService.AddRunProgress(participant.player, xp, participant.kills)
+		DataService.ConsumeBoosts(participant.player)
 		DataService.Save(participant.player)
 		notify(
 			participant.player,
@@ -1219,6 +1249,7 @@ function ConvoyRunService.EndRun(session: RunSession)
 			bossKills = participant.bossKills,
 			pickups = participant.pickups,
 			xpEarned = xp,
+			boosts = boostNames,
 			level = level,
 			levelsGained = levelsGained,
 			newRecord = isRecord,

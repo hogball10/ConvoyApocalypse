@@ -11,10 +11,12 @@ Remotes.Init()
 local GarageController = require(script.Parent:WaitForChild("GarageController"))
 local RunHUD = require(script.Parent:WaitForChild("RunHUD"))
 local VehicleControls = require(script.Parent:WaitForChild("VehicleControls"))
+local ShopUI = require(script.Parent:WaitForChild("ShopUI"))
 
 GarageController.Init()
 
 VehicleControls.Init()
+ShopUI.Init()
 
 RunHUD.Init(function()
 	GarageController.SetInRun(false)

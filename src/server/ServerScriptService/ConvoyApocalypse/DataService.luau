@@ -34,6 +34,7 @@ export type PlayerProfile = {
 	activeSlot: number,
 	slots: { SlotData },
 	highScore: number,
+	boosts: { [string]: number }, -- shop boosts: item id -> runs left
 	xp: number,
 	level: number,
 	totalKills: number,
@@ -103,6 +104,7 @@ local function defaultProfile(): PlayerProfile
 		activeSlot = 1,
 		slots = slots,
 		highScore = 0,
+		boosts = {},
 		xp = 0,
 		level = 1,
 		totalKills = 0,
@@ -332,6 +334,69 @@ function DataService.AddRunProgress(player: Player, xp: number, kills: number): 
 	end
 	DataService.Replicate(player)
 	return profile.level, levelsGained
+end
+
+-- Shop boosts last a number of runs. The effects of every active boost with
+-- the given key multiply together.
+function DataService.BuyBoost(player: Player, itemId: string): (boolean, string?)
+	local profile = DataService._profiles[player.UserId]
+	local item = Constants.ShopItem(itemId)
+	if not profile or not item then
+		return false, "Unknown item"
+	end
+	local current = profile.boosts[itemId] or 0
+	if current >= Constants.SHOP_MAX_RUNS then
+		return false, "Already stocked up"
+	end
+	if not DataService.TrySpendScrap(player, item.price) then
+		return false, "Need " .. tostring(item.price) .. " scrap"
+	end
+	profile.boosts[itemId] = math.min(Constants.SHOP_MAX_RUNS, current + item.runs)
+	DataService.Replicate(player)
+	DataService.Save(player)
+	return true, nil
+end
+
+function DataService.BoostEffect(player: Player, key: string): number
+	local profile = DataService._profiles[player.UserId]
+	local total = 1
+	if not profile then
+		return total
+	end
+	for id, left in profile.boosts do
+		local item = Constants.ShopItem(id)
+		if item and left > 0 and item.effects[key] then
+			total *= item.effects[key]
+		end
+	end
+	return total
+end
+
+function DataService.ActiveBoostNames(player: Player): { string }
+	local profile = DataService._profiles[player.UserId]
+	local names = {}
+	if profile then
+		for id, left in profile.boosts do
+			local item = Constants.ShopItem(id)
+			if item and left > 0 then
+				table.insert(names, item.name)
+			end
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+-- One run used up on every active boost.
+function DataService.ConsumeBoosts(player: Player)
+	local profile = DataService._profiles[player.UserId]
+	if not profile then
+		return
+	end
+	for id, left in table.clone(profile.boosts) do
+		profile.boosts[id] = if left > 1 then left - 1 else nil
+	end
+	DataService.Replicate(player)
 end
 
 -- Trading helpers: only unequipped owned parts
