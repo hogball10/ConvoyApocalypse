@@ -59,6 +59,14 @@ local ROAD_REFRESH_STUDS = 15
 -- ceiling a long run ends up with hundreds of them.
 local MAX_ZOMBIES = 45
 
+-- Steering. STEER_RATE is radians per second at handling 1, STEER_RECENTER how
+-- fast the nose swings back to straight, MAX_HEADING how far it may point off
+-- the road, and ROAD_HALF_WIDTH where the car's centre hits the guardrails.
+local STEER_RATE = 0.9
+local STEER_RECENTER = 1.4
+local MAX_HEADING = 0.6
+local ROAD_HALF_WIDTH = 13
+
 -- Seconds before the same zombie can be rammed again.
 local RAM_COOLDOWN = 0.5
 
@@ -959,15 +967,30 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		local newVel = vel:Lerp(Vector3.new(desired.X, vel.Y, desired.Z), blend)
 		body.AssemblyLinearVelocity = newVel
 
+		-- The road runs straight down -Z, so the heading is kept within a cone
+		-- around it: steering swings the nose a little, and letting go
+		-- straightens the car back out. Left unbounded, a held key spun the car
+		-- in circles and drove it off the road.
+		local _, heading = body.CFrame:ToEulerAnglesYXZ()
 		if math.abs(steer) > 0.05 and fuel > 0 then
-			local yaw = -steer * handling * 2.2 * dt
-			body.CFrame = body.CFrame * CFrame.Angles(0, yaw, 0)
+			heading -= steer * handling * STEER_RATE * dt
+		else
+			heading -= math.sign(heading) * math.min(math.abs(heading), STEER_RECENTER * dt)
 		end
+		heading = math.clamp(heading, -MAX_HEADING, MAX_HEADING)
 
-		-- Keep upright
-		local _, y = body.CFrame:ToEulerAnglesYXZ()
-		body.CFrame = CFrame.new(body.Position) * CFrame.Angles(0, y, 0)
-		body.AssemblyAngularVelocity = Vector3.new(0, body.AssemblyAngularVelocity.Y * 0.2, 0)
+		-- Keep upright and on the tarmac
+		local pos = body.Position
+		local limit = ROAD_HALF_WIDTH
+		if math.abs(pos.X) > limit then
+			pos = Vector3.new(math.sign(pos.X) * limit, pos.Y, pos.Z)
+			local v = body.AssemblyLinearVelocity
+			if v.X * pos.X > 0 then
+				body.AssemblyLinearVelocity = Vector3.new(0, v.Y, v.Z)
+			end
+		end
+		body.CFrame = CFrame.new(pos) * CFrame.Angles(0, heading, 0)
+		body.AssemblyAngularVelocity = Vector3.zero
 
 		-- Fuel drain
 		local drain = Constants.IDLE_FUEL_DRAIN
