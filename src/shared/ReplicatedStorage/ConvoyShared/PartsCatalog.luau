@@ -740,7 +740,7 @@ local weaponFamilies = {
 		weight = 14,
 		desc = "Spinning barrels. Holds the trigger.",
 		stats = function(tier: string): { [string]: number }
-			return { ramDamage = 8, gunDamage = scaled(7, tier), fireRate = 10 + TIER_INDEX[tier] }
+			return { ramDamage = 8, gunDamage = scaled(3, tier), fireRate = 28 + 2 * TIER_INDEX[tier] }
 		end,
 	},
 	{
@@ -749,7 +749,7 @@ local weaponFamilies = {
 		weight = 12,
 		desc = "Coil that jumps between zombies.",
 		stats = function(tier: string): { [string]: number }
-			return { ramDamage = 4, gunDamage = scaled(16, tier), fireRate = 2.5 }
+			return { ramDamage = 4, gunDamage = scaled(10, tier), fireRate = 4 }
 		end,
 	},
 	{

@@ -74,6 +74,10 @@ local ROAD_HALF_WIDTH = 13
 -- Where each car was last frame, to charge fuel for the ground actually covered.
 local lastPositions: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
 
+-- Fractional shots carried over between frames, per car.
+local fireCharge: { [Model]: number } = setmetatable({}, { __mode = "k" }) :: any
+local MAX_SHOTS_PER_FRAME = 4
+
 -- A client input older than this is ignored (the player released everything or
 -- dropped), and the seat's own values are used instead.
 local INPUT_TIMEOUT = 0.5
@@ -567,7 +571,49 @@ local function tracer(from: Vector3, to: Vector3, color: Color3, width: number)
 	beam.Size = Vector3.new(width, width, dist)
 	beam.CFrame = CFrame.lookAt(from, to) * CFrame.new(0, 0, -dist / 2)
 	beam.Parent = Workspace
-	Debris:AddItem(beam, 0.12)
+	Debris:AddItem(beam, 0.16)
+end
+
+-- A jagged bolt: a few short beams with sideways kinks, so it reads as
+-- lightning rather than a straight laser.
+local function bolt(from: Vector3, to: Vector3)
+	local along = to - from
+	local dist = along.Magnitude
+	if dist < 1 then
+		return
+	end
+	local dir = along / dist
+	local side = dir:Cross(Vector3.yAxis)
+	if side.Magnitude < 0.01 then
+		side = Vector3.xAxis
+	end
+	side = side.Unit
+	local up = side:Cross(dir)
+	local segments = math.clamp(math.floor(dist / 4), 3, 9)
+	local last = from
+	for i = 1, segments do
+		local point = from + along * (i / segments)
+		if i < segments then
+			point += side * (math.random() - 0.5) * 3 + up * (math.random() - 0.5) * 3
+		end
+		tracer(last, point, Color3.fromRGB(150, 215, 255), 0.45)
+		tracer(last, point, Color3.fromRGB(255, 255, 255), 0.15)
+		last = point
+	end
+	local flash = Instance.new("Part")
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.Transparency = 1
+	flash.Position = to
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(150, 215, 255)
+	light.Range = 14
+	light.Brightness = 3
+	light.Parent = flash
+	flash.Parent = Workspace
+	Debris:AddItem(flash, 0.15)
 end
 
 local function hit(session: RunSession, participant: Participant, zombie: Model, damage: number): boolean
@@ -626,7 +672,7 @@ local function fireWeapon(session: RunSession, participant: Participant, body: B
 		local dmg = damage
 		for _ = 1, 4 do
 			struck[current.model] = true
-			tracer(from, current.pos, Color3.fromRGB(120, 200, 255), 0.35)
+			bolt(from, current.pos)
 			hit(session, participant, current.model, dmg)
 			from = current.pos
 			dmg *= 0.75
@@ -1098,8 +1144,12 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		local gunDamage = vehicle:GetAttribute("GunDamage") :: number
 		local fireRate = vehicle:GetAttribute("FireRate") :: number
 		if gunDamage > 0 and fireRate > 0 and fuel > 0 then
-			-- Probabilistic fire each step scaled by fireRate
-			if math.random() < fireRate * dt then
+			-- Charge builds at fireRate per second and each whole point is a
+			-- shot, so fast guns really fire fast whatever the frame rate.
+			local charge = (fireCharge[vehicle] or 0) + fireRate * dt
+			local shots = math.min(math.floor(charge), MAX_SHOTS_PER_FRAME)
+			fireCharge[vehicle] = if shots >= MAX_SHOTS_PER_FRAME then 0 else charge - shots
+			for _ = 1, shots do
 				fireWeapon(session, participant, body, gunDamage)
 			end
 		end
