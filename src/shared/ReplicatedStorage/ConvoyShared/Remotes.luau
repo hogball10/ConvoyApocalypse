@@ -19,6 +19,7 @@ local EVENT_NAMES = {
 	"LeaveRun",
 	"RunState",
 	"VehicleInput",
+	"ReturnToGarage",
 	"FireWeapon",
 	"TradeRequest",
 	"TradeUpdate",

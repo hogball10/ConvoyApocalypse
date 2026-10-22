@@ -27,6 +27,10 @@ export type Participant = {
 	overwhelmTimer: number,
 	pickups: number,
 	bossKills: number,
+	-- Latest steering sent by the player's client, and when it arrived.
+	throttle: number,
+	steer: number,
+	inputAt: number,
 }
 
 export type RunSession = {
@@ -67,12 +71,21 @@ local STEER_RECENTER = 1.4
 local MAX_HEADING = 0.6
 local ROAD_HALF_WIDTH = 13
 
+-- A client input older than this is ignored (the player released everything or
+-- dropped), and the seat's own values are used instead.
+local INPUT_TIMEOUT = 0.5
+
+-- Seconds after a run ends before players are sent back to their garage.
+local AUTO_RETURN_DELAY = 8
+
 -- Seconds before the same zombie can be rammed again.
 local RAM_COOLDOWN = 0.5
 
 local ConvoyRunService = {}
 ConvoyRunService._runs = {} :: { [string]: RunSession }
 ConvoyRunService._playerRun = {} :: { [number]: string }
+-- Set by GarageService: puts a player back in their garage after a run.
+ConvoyRunService.ReturnHandler = nil :: ((Player, boolean?) -> ())?
 
 local function notify(player: Player, message: string)
 	Remotes.Event("Notification"):FireClient(player, message)
@@ -855,6 +868,9 @@ function ConvoyRunService.Start(host: Player)
 		overwhelmTimer = 0,
 		pickups = 0,
 		bossKills = 0,
+		throttle = 0,
+		steer = 0,
+		inputAt = 0,
 	}
 	session.participants[host.UserId] = participant
 	ConvoyRunService._runs[runId] = session
@@ -912,6 +928,9 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 		overwhelmTimer = 0,
 		pickups = 0,
 		bossKills = 0,
+		throttle = 0,
+		steer = 0,
+		inputAt = 0,
 	}
 	session.participants[player.UserId] = participant
 	ConvoyRunService._playerRun[player.UserId] = session.id
@@ -941,8 +960,13 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 
 		-- Drive motors from VehicleSeat throttle
 		local seat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat?
+		-- Prefer what the client sent; fall back to the seat if it has gone quiet.
 		local throttle = if seat then seat.ThrottleFloat else 0
 		local steer = if seat then seat.SteerFloat else 0
+		if os.clock() - participant.inputAt < INPUT_TIMEOUT then
+			throttle = participant.throttle
+			steer = participant.steer
+		end
 		local speedStat = vehicle:GetAttribute("Speed") :: number
 		local accel = vehicle:GetAttribute("Accel") :: number
 		local boostMult = vehicle:GetAttribute("BoostMult") :: number
@@ -1203,6 +1227,25 @@ function ConvoyRunService.EndRun(session: RunSession)
 		ConvoyRunService._playerRun[participant.player.UserId] = nil
 	end
 
+	-- Nobody should be left standing in the wasteland: return everyone to their
+	-- garage a few seconds after the run ends (the end screen has a button for
+	-- doing it sooner).
+	local returning = {}
+	for _, participant in session.participants do
+		table.insert(returning, participant.player)
+	end
+	task.delay(AUTO_RETURN_DELAY, function()
+		local handler = ConvoyRunService.ReturnHandler
+		if not handler then
+			return
+		end
+		for _, player in returning do
+			if player.Parent and not ConvoyRunService._playerRun[player.UserId] then
+				handler(player, true)
+			end
+		end
+	end)
+
 	-- Cleanup world pieces
 	task.delay(3, function()
 		if session.roadFolder.Parent then
@@ -1236,6 +1279,22 @@ function ConvoyRunService.Init()
 		end
 		ConvoyRunService.Join(player, hostUserId)
 	end)
+	Remotes.Event("VehicleInput").OnServerEvent:Connect(function(player, throttle, steer)
+		if typeof(throttle) ~= "number" or typeof(steer) ~= "number" then
+			return
+		end
+		local runId = ConvoyRunService._playerRun[player.UserId]
+		local session = runId and ConvoyRunService._runs[runId]
+		local participant = session and session.participants[player.UserId]
+		if not participant then
+			return
+		end
+		-- NaN and out-of-range values would otherwise steer the car arbitrarily.
+		participant.throttle = if throttle ~= throttle then 0 else math.clamp(throttle, -1, 1)
+		participant.steer = if steer ~= steer then 0 else math.clamp(steer, -1, 1)
+		participant.inputAt = os.clock()
+	end)
+
 	Remotes.Event("LeaveRun").OnServerEvent:Connect(function(player)
 		local runId = ConvoyRunService._playerRun[player.UserId]
 		local session = runId and ConvoyRunService._runs[runId]

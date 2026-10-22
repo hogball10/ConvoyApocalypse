@@ -513,6 +513,46 @@ function GarageService.TeleportToGarage(player: Player, hostUserId: number)
 	end
 end
 
+-- Brings a player back to the garage they belong to, from wherever they are:
+-- respawning them first if they are dead or still seated in a wrecked car.
+function GarageService.ReturnToGarage(player: Player, silent: boolean?)
+	if ConvoyRunService.IsInRun(player) then
+		if not silent then
+			notify(player, "Finish the run first")
+		end
+		return
+	end
+	local hostId = GarageService._playerGarage[player.UserId]
+	if not hostId or not GarageService._garages[hostId] then
+		hostId = player.UserId
+	end
+	if not GarageService._garages[hostId] then
+		GarageService.OpenFor(player)
+		return
+	end
+	GarageService._playerGarage[player.UserId] = hostId
+	GarageService._garages[hostId].occupants[player.UserId] = true
+	-- Tells the client the run is behind it: closes the end screen, brings the garage UI back.
+	Remotes.Event("EnterGarage"):FireClient(player, {
+		hostUserId = hostId,
+		isHost = hostId == player.UserId,
+	})
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character or not humanoid or humanoid.Health <= 0 then
+		-- RespawnLocation points at the garage spawn, so a fresh character lands there.
+		GarageService.TeleportToGarage(player, hostId)
+		player:LoadCharacter()
+		return
+	end
+	humanoid.Sit = false
+	GarageService.TeleportToGarage(player, hostId)
+	if not silent then
+		notify(player, "Back in the garage")
+	end
+end
+
 function GarageService.Join(player: Player, hostUserId: number)
 	if ConvoyRunService.IsInRun(player) then
 		notify(player, "Leave your run first")
@@ -1015,6 +1055,12 @@ function GarageService.Init()
 		if GarageService._garages[player.UserId] then
 			GarageService.RefreshPreview(player.UserId)
 		end
+	end)
+
+	ConvoyRunService.ReturnHandler = GarageService.ReturnToGarage
+
+	Remotes.Event("ReturnToGarage").OnServerEvent:Connect(function(player)
+		GarageService.ReturnToGarage(player)
 	end)
 
 	Remotes.Event("SelectLeverTarget").OnServerEvent:Connect(function(player, kind, targetId)

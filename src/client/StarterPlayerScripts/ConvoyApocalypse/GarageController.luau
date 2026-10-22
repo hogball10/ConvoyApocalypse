@@ -270,6 +270,17 @@ local function buildInventory()
 		Position = UDim2.new(0, 16, 1, -52),
 		Parent = gui,
 	})
+	-- Always available between runs, so nobody stays stranded out on the road.
+	local garageButton = UIUtil.Button({
+		Name = "ReturnToGarage",
+		Text = "RETURN TO GARAGE",
+		Size = UDim2.fromOffset(200, 36),
+		Position = UDim2.new(0, 204, 1, -52),
+		Parent = gui,
+	})
+	garageButton.MouseButton1Click:Connect(function()
+		Remotes.Event("ReturnToGarage"):FireServer()
+	end)
 	inventoryPanel = UIUtil.Frame({
 		Name = "Panel",
 		Size = UDim2.fromOffset(340, 460),
