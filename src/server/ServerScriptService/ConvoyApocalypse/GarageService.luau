@@ -27,11 +27,16 @@ export type GarageSession = {
 	occupants: { [number]: boolean },
 	previewVehicle: Model?,
 	folder: Folder,
+	-- Which bay along the row this garage stands in.
+	slot: number,
 }
 
 local GarageService = {}
 GarageService._garages = {} :: { [number]: GarageSession } -- keyed by host
 GarageService._playerGarage = {} :: { [number]: number } -- player -> hostUserId
+-- Bays along the row, 100 studs apart. A bay is held until its owner leaves, so a
+-- newcomer never lands on top of someone still standing in theirs.
+GarageService._slotTaken = {} :: { [number]: boolean }
 GarageService._targets = {} :: { [number]: { [string]: string } }
 GarageService._pullCooldown = {} :: { [number]: number }
 GarageService._spins = {} :: { [number]: { [string]: { token: number, busy: boolean, partId: string?, model: Model? } } }
@@ -487,9 +492,10 @@ function GarageService.OpenFor(player: Player)
 	end
 
 	local index = 0
-	for _ in GarageService._garages do
+	while GarageService._slotTaken[index] do
 		index += 1
 	end
+	GarageService._slotTaken[index] = true
 
 	local folder = buildGaragePad(player, index)
 	local session: GarageSession = {
@@ -497,6 +503,7 @@ function GarageService.OpenFor(player: Player)
 		occupants = { [player.UserId] = true },
 		previewVehicle = nil,
 		folder = folder,
+		slot = index,
 	}
 	GarageService._garages[player.UserId] = session
 	GarageService._playerGarage[player.UserId] = player.UserId
@@ -1193,6 +1200,7 @@ function GarageService.Init()
 			if garage.folder then
 				garage.folder:Destroy()
 			end
+			GarageService._slotTaken[garage.slot] = nil
 			GarageService._garages[player.UserId] = nil
 		end
 		GarageService._playerGarage[player.UserId] = nil

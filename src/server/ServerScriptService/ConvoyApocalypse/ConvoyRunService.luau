@@ -53,7 +53,16 @@ export type RunSession = {
 	accum: number,
 	lastRoadDistance: number,
 	appliedBiome: string?,
+	-- Every active run gets its own strip of the world so convoys don't share a
+	-- road: lane number, and the X that lane's road runs down.
+	lane: number,
+	originX: number,
 }
+
+-- Lanes are this far apart. The road's far ground is 240 wide, so there is room
+-- to spare between neighbours.
+local LANE_SPACING = 400
+local lanesTaken: { [number]: boolean } = {}
 
 -- Rebuilding the road and re-pushing Lighting every Heartbeat is wasted work;
 -- segments are 60 studs long so this is still far ahead of the player.
@@ -192,10 +201,11 @@ local function ensureWorld(): Folder
 	return world :: Folder
 end
 
-local function buildRoadSegment(parent: Folder, z: number, biome: string)
+-- Built around X = 0, then slid over to the run's lane once it is complete, so
+-- the segment never shows up half-built or in the wrong place.
+local function buildRoadSegment(parent: Folder, z: number, biome: string, originX: number)
 	local seg = Instance.new("Model")
 	seg.Name = "Road_" .. tostring(z)
-	seg.Parent = parent
 
 	local ground = biomeColor(biome)
 	local asphalt = ground:Lerp(Color3.fromRGB(35, 35, 38), 0.55)
@@ -294,6 +304,9 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string)
 		local side = if rng:NextNumber() > 0.5 then 42 else -42
 		placeProp("Antenna", CFrame.new(side, 0.5, -z + 6), seg)
 	end
+
+	seg:TranslateBy(Vector3.new(originX, 0, 0))
+	seg.Parent = parent
 end
 
 local function refreshRoad(session: RunSession)
@@ -314,7 +327,7 @@ local function refreshRoad(session: RunSession)
 		local z = math.floor((centerZ + i * 60) / 60) * 60
 		local name = "Road_" .. tostring(z)
 		if not session.roadFolder:FindFirstChild(name) then
-			buildRoadSegment(session.roadFolder, z, biome)
+			buildRoadSegment(session.roadFolder, z, biome, session.originX)
 		end
 	end
 end
@@ -351,7 +364,7 @@ local function spawnZombie(session: RunSession, isBoss: boolean?)
 
 	local lane = if boss then 0 else (math.random() - 0.5) * 28
 	local ahead = session.distance + 80 + math.random(0, 40)
-	body.CFrame = CFrame.new(lane, 2.2, -ahead)
+	body.CFrame = CFrame.new(session.originX + lane, 2.2, -ahead)
 
 	-- The kit zombie is a Model with one MeshPart per colour; only "Skin" takes
 	-- the biome tint. An older single-mesh export is tinted whole.
@@ -526,7 +539,7 @@ local function spawnPickup(session: RunSession)
 	part.CanTouch = false
 	part.Material = Enum.Material.Neon
 	part.Color = chosen.color
-	part.Position = Vector3.new((math.random() - 0.5) * 24, 3.5, -(session.distance + 140 + math.random(0, 60)))
+	part.Position = Vector3.new(session.originX + (math.random() - 0.5) * 24, 3.5, -(session.distance + 140 + math.random(0, 60)))
 	part:SetAttribute("Kind", chosen.kind)
 	local light = Instance.new("PointLight")
 	light.Color = chosen.color
@@ -934,6 +947,12 @@ function ConvoyRunService.Start(host: Player)
 
 	local world = ensureWorld()
 	local runId = "run_" .. tostring(host.UserId) .. "_" .. tostring(os.time())
+	local lane = 0
+	while lanesTaken[lane] do
+		lane += 1
+	end
+	lanesTaken[lane] = true
+	local originX = lane * LANE_SPACING
 
 	local roadFolder = Instance.new("Folder")
 	roadFolder.Name = "Road_" .. runId
@@ -951,7 +970,7 @@ function ConvoyRunService.Start(host: Player)
 	vehiclesFolder.Name = "Vehicles_" .. runId
 	vehiclesFolder.Parent = world
 
-	local spawnCF = CFrame.new(0, 0.6, 0)
+	local spawnCF = CFrame.new(originX, 0.6, 0)
 	local vehicle = VehicleFactory.Create(host, blocks, spawnCF)
 	applyBoosts(host, vehicle)
 	vehicle.Parent = vehiclesFolder
@@ -976,6 +995,8 @@ function ConvoyRunService.Start(host: Player)
 		-- Negative so the first Step always builds the road.
 		lastRoadDistance = -math.huge,
 		appliedBiome = nil,
+		lane = lane,
+		originX = originX,
 	}
 
 	local participant: Participant = {
@@ -1032,7 +1053,7 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 	end
 
 	local vehiclesFolder = session.roadFolder.Parent:FindFirstChild("Vehicles_" .. session.id) :: Folder
-	local spawnCF = CFrame.new(offset, 0.6, -session.distance)
+	local spawnCF = CFrame.new(session.originX + offset, 0.6, -session.distance)
 	local vehicle = VehicleFactory.Create(player, blocks, spawnCF)
 	applyBoosts(player, vehicle)
 	vehicle.Parent = vehiclesFolder
@@ -1125,10 +1146,11 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		-- Keep upright and on the tarmac
 		local pos = body.Position
 		local limit = ROAD_HALF_WIDTH
-		if math.abs(pos.X) > limit then
-			pos = Vector3.new(math.sign(pos.X) * limit, pos.Y, pos.Z)
+		local roadX = pos.X - session.originX
+		if math.abs(roadX) > limit then
+			pos = Vector3.new(session.originX + math.sign(roadX) * limit, pos.Y, pos.Z)
 			local v = body.AssemblyLinearVelocity
-			if v.X * pos.X > 0 then
+			if v.X * roadX > 0 then
 				body.AssemblyLinearVelocity = Vector3.new(0, v.Y, v.Z)
 			end
 		end
@@ -1410,6 +1432,7 @@ function ConvoyRunService.EndRun(session: RunSession)
 				vehicles:Destroy()
 			end
 		end
+		lanesTaken[session.lane] = nil
 	end)
 
 	ConvoyRunService._runs[session.id] = nil
