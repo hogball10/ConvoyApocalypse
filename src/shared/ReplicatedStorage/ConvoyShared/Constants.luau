@@ -19,8 +19,13 @@ Constants.BASE_SPEED = 40
 Constants.BASE_ACCEL = 20
 Constants.BASE_HANDLING = 1
 Constants.BASE_WEIGHT_CAP = 100
-Constants.FUEL_DRAIN_PER_SECOND = 0.5
-Constants.IDLE_FUEL_DRAIN = 0.15
+Constants.FUEL_DRAIN_PER_SECOND = 1.0
+Constants.IDLE_FUEL_DRAIN = 0.3
+-- Drain climbs the further a run goes (x2 at this many metres, x3 at twice
+-- that...), so a bigger tank keeps paying off deep into a run.
+Constants.FUEL_DRAIN_RAMP_METERS = 3000
+-- Fraction of the tank a fuel pickup refills.
+Constants.FUEL_PICKUP_FRACTION = 0.2
 
 -- Run
 Constants.BIOME_LENGTH = 500 -- studs per biome segment

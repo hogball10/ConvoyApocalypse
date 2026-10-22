@@ -533,8 +533,8 @@ local function collectPickup(participant: Participant, pickup: BasePart)
 	local vehicle = participant.vehicle
 	if kind == "Fuel" then
 		local maxFuel = vehicle:GetAttribute("MaxFuel") :: number
-		vehicle:SetAttribute("Fuel", math.min(maxFuel, (vehicle:GetAttribute("Fuel") :: number) + maxFuel * 0.3))
-		notify(participant.player, "+30% fuel")
+		vehicle:SetAttribute("Fuel", math.min(maxFuel, (vehicle:GetAttribute("Fuel") :: number) + maxFuel * Constants.FUEL_PICKUP_FRACTION))
+		notify(participant.player, string.format("+%d%% fuel", math.round(Constants.FUEL_PICKUP_FRACTION * 100)))
 	elseif kind == "Repair" then
 		local maxHealth = vehicle:GetAttribute("MaxHealth") :: number
 		vehicle:SetAttribute("Health", math.min(maxHealth, (vehicle:GetAttribute("Health") :: number) + maxHealth * 0.25))
@@ -1048,6 +1048,7 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		if math.abs(targetSpeed) > 1 then
 			drain = Constants.FUEL_DRAIN_PER_SECOND
 		end
+		drain *= 1 + session.distance / Constants.FUEL_DRAIN_RAMP_METERS
 		fuel = math.max(0, fuel - drain * dt)
 		vehicle:SetAttribute("Fuel", fuel)
 
