@@ -22,6 +22,7 @@ local player = Players.LocalPlayer
 local GarageController = {}
 GarageController._data = nil :: any
 GarageController._inRun = false
+GarageController._scrapBar = nil :: TextLabel?
 GarageController._holdId = nil :: string?
 GarageController._rot = 0
 GarageController._ghost = nil :: Model?
@@ -424,12 +425,35 @@ local function showLeverPicker(kind: string?)
 	end
 end
 
+-- Always on screen in the garage, so the balance is visible while shopping.
+local function buildScrapBar()
+	local gui = UIUtil.ScreenGui("ScrapBar", player:WaitForChild("PlayerGui"))
+	local frame = UIUtil.Frame({
+		Name = "Pill",
+		Size = UDim2.fromOffset(190, 40),
+		Position = UDim2.new(0.5, 0, 0, 14),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Parent = gui,
+	})
+	GarageController._scrapBar = UIUtil.Text({
+		Name = "Scrap",
+		Text = "Scrap  0",
+		Size = UDim2.new(1, -16, 1, 0),
+		Position = UDim2.fromOffset(8, 0),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = UIUtil.Colors.Scrap,
+		Font = Enum.Font.GothamBlack,
+		Parent = frame,
+	})
+end
+
 local function buildLeverPicker()
 	local gui = UIUtil.ScreenGui("LeverPicker", player:WaitForChild("PlayerGui"))
 	local frame = UIUtil.Frame({
 		Name = "Panel",
 		Size = UDim2.fromOffset(620, 130),
-		Position = UDim2.new(0.5, 0, 1, -24),
+		-- Clear of the Inventory / Return / Boost Shop buttons along the bottom edge.
+		Position = UDim2.new(0.5, 0, 1, -64),
 		AnchorPoint = Vector2.new(0.5, 1),
 		Visible = false,
 		Parent = gui,
@@ -659,6 +683,9 @@ local function refreshScrap()
 	if not data then
 		return
 	end
+	if GarageController._scrapBar then
+		GarageController._scrapBar.Text = "Scrap  " .. tostring(data.scrap)
+	end
 	writeLabel("ScrapReadout", "Scrap  " .. tostring(data.scrap), Color3.fromRGB(255, 196, 80))
 	local partId = GarageController._holdId
 	if partId and unplaced(partId) <= 0 then
@@ -708,7 +735,7 @@ function GarageController.SetInRun(inRun: boolean)
 	if inRun then
 		clearHold()
 	end
-	for _, name in { "Inventory", "Shop" } do
+	for _, name in { "Inventory", "Shop", "ScrapBar" } do
 		local gui = player.PlayerGui:FindFirstChild(name)
 		if gui and gui:IsA("ScreenGui") then
 			gui.Enabled = not inRun
@@ -719,6 +746,7 @@ end
 function GarageController.Init()
 	Remotes.Init()
 	buildInventory()
+	buildScrapBar()
 	buildLeverPicker()
 
 	Remotes.Event("DataUpdated").OnClientEvent:Connect(function(data)
