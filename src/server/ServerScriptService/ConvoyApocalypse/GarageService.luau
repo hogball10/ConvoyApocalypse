@@ -74,8 +74,11 @@ local LEVER_SPOTS: { [string]: { number } } = {
 	Weapons = { 22, 6 },
 }
 
-local function leverCost(kind: string): number
-	return Constants.LEVER_COSTS[kind] or 30
+-- A lever's listed price is for a Common; what it landed on costs more the
+-- rarer it is.
+local function leverCost(kind: string, tier: string?): number
+	local base = Constants.LEVER_COSTS[kind] or 30
+	return math.floor(base * (Constants.LEVER_TIER_MULT[tier or "Common"] or 1) + 0.5)
 end
 
 local setLeverSign: (Folder, string, string) -> ()
@@ -635,7 +638,7 @@ function GarageService.LeverIdleText(kind: string, title: string, cost: number, 
 	for _, entry in Constants.RARITY_ODDS do
 		table.insert(odds, string.format("%s %.1f%%", entry.tier, entry.weight / total * 100))
 	end
-	return string.format("%s\nRolling: %s\nBuy %d scrap\n%s", title, if target then target.label else "?", cost, table.concat(odds, "  "))
+	return string.format("%s\nRolling: %s\nBuy from %d scrap\n%s", title, if target then target.label else "?", cost, table.concat(odds, "  "))
 end
 
 function GarageService.PlayerTargets(player: Player): { [string]: string }
@@ -820,7 +823,7 @@ function GarageService.BuyOffer(player: Player, kind: string)
 	if not part then
 		return
 	end
-	local cost = leverCost(kind)
+	local cost = leverCost(kind, part.tier)
 	if not DataService.TrySpendScrap(player, cost) then
 		notify(player, "Need " .. tostring(cost) .. " scrap")
 		return
@@ -979,7 +982,7 @@ function GarageService.PullLever(player: Player, kind: string)
 		local host = winner.PrimaryPart
 		if host then
 			host.CanQuery = true
-			local cost = leverCost(kind)
+			local cost = leverCost(kind, tier)
 			local prompt = Instance.new("ProximityPrompt")
 			prompt.Name = "BuyPrompt"
 			prompt.ActionText = "Buy"
@@ -1007,7 +1010,7 @@ function GarageService.PullLever(player: Player, kind: string)
 			label.Text = tier .. " " .. part.name .. "\n" .. tostring(cost) .. " scrap"
 			label.Parent = billboard
 		end
-		setLeverSign(folder, kind, tier .. " " .. part.name .. "\n" .. tostring(leverCost(kind)) .. " scrap to buy\nPull again to spin")
+		setLeverSign(folder, kind, tier .. " " .. part.name .. "\n" .. tostring(leverCost(kind, tier)) .. " scrap to buy\nPull again to spin")
 		notify(player, tier .. " " .. part.name .. " — buy it, or pull again")
 	end)
 end

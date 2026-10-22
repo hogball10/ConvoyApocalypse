@@ -63,6 +63,18 @@ Constants.LEVER_COSTS = {
 	Gear = 35,
 	Weapons = 35,
 }
+-- What a lever's price is multiplied by for the tier it landed on, so a
+-- Legendary costs far more than a Common from the same lever.
+Constants.LEVER_TIER_MULT = {
+	Scrap = 1,
+	Common = 1,
+	Uncommon = 2,
+	Rare = 4.5,
+	Epic = 10,
+	Legendary = 22,
+	Mythic = 48,
+	Relic = 100,
+}
 Constants.STARTING_SLOTS = 1
 Constants.MAX_SLOTS = 4
 Constants.SLOT_UNLOCK_COSTS = { 0, 200, 500, 1000 }
