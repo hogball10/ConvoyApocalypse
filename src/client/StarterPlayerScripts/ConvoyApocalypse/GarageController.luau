@@ -96,7 +96,7 @@ local STAT_LABELS: { [string]: string } = {
 	accel = "ACC",
 	handling = "HND",
 	offroad = "OFF",
-	fuel = "FUEL",
+	fuel = "RANGE",
 	damageReduction = "DEF",
 	gunDamage = "DMG",
 	fireRate = "RATE",
@@ -118,7 +118,9 @@ local function statLine(part: any): string
 		local value = part.stats[key]
 		if value and value ~= 0 then
 			local text
-			if key == "damageReduction" then
+			if key == "fuel" then
+				text = string.format("%dm", math.round(Constants.FuelRange(value)))
+			elseif key == "damageReduction" then
 				text = string.format("%d%%", math.round(value * 100))
 			elseif value >= 10 then
 				text = tostring(math.round(value))

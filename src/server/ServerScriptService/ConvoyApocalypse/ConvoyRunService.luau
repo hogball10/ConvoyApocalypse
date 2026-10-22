@@ -71,6 +71,9 @@ local STEER_RECENTER = 1.4
 local MAX_HEADING = 0.6
 local ROAD_HALF_WIDTH = 13
 
+-- Where each car was last frame, to charge fuel for the ground actually covered.
+local lastPositions: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :: any
+
 -- A client input older than this is ignored (the player released everything or
 -- dropped), and the seat's own values are used instead.
 local INPUT_TIMEOUT = 0.5
@@ -1044,12 +1047,18 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		body.AssemblyAngularVelocity = Vector3.zero
 
 		-- Fuel drain
-		local drain = Constants.IDLE_FUEL_DRAIN
-		if math.abs(targetSpeed) > 1 then
-			drain = Constants.FUEL_DRAIN_PER_SECOND
+		-- Fuel goes by distance driven, so tank capacity translates directly
+		-- into range whatever the engine or the throttle.
+		local here = Vector3.new(pos.X, 0, pos.Z)
+		local before = lastPositions[vehicle]
+		lastPositions[vehicle] = here
+		local moved = if before then (here - before).Magnitude else 0
+		local spent = moved * Constants.FUEL_PER_METER
+		if moved < dt then
+			-- Barely moving: idle burn only.
+			spent += Constants.IDLE_FUEL_DRAIN * dt
 		end
-		drain *= 1 + session.distance / Constants.FUEL_DRAIN_RAMP_METERS
-		fuel = math.max(0, fuel - drain * dt)
+		fuel = math.max(0, fuel - spent)
 		vehicle:SetAttribute("Fuel", fuel)
 
 		-- Shield recharges once it has gone a few seconds without a hit
