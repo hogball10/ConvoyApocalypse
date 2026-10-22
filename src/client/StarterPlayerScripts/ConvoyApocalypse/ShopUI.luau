@@ -143,15 +143,26 @@ local function build()
 		ShopUI._rows[item.id] = { owned = owned, buy = buy }
 	end
 
+	-- The pass shop sits in the same spot, so only one is open at a time.
+	local function setOpen(open: boolean)
+		panel.Visible = open
+		if open then
+			local passes = player.PlayerGui:FindFirstChild("Passes")
+			local passPanel = if passes then passes:FindFirstChild("Panel") else nil
+			if passPanel and passPanel:IsA("GuiObject") then
+				passPanel.Visible = false
+			end
+		end
+	end
 	toggle.MouseButton1Click:Connect(function()
-		panel.Visible = not panel.Visible
+		setOpen(not panel.Visible)
 	end)
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or input.KeyCode ~= Enum.KeyCode.B then
 			return
 		end
 		if gui.Enabled then
-			panel.Visible = not panel.Visible
+			setOpen(not panel.Visible)
 		end
 	end)
 	refresh()

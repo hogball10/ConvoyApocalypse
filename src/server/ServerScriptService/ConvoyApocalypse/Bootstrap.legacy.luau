@@ -24,10 +24,12 @@ local DataService = require(root:WaitForChild("DataService"))
 local ConvoyRunService = require(root:WaitForChild("ConvoyRunService"))
 local GarageService = require(root:WaitForChild("GarageService"))
 local TradeService = require(root:WaitForChild("TradeService"))
+local GamepassService = require(root:WaitForChild("GamepassService"))
 
 DataService.Init()
 ConvoyRunService.Init()
 GarageService.Init()
 TradeService.Init()
+GamepassService.Init()
 
 print("[ConvoyApocalypse] Server ready")

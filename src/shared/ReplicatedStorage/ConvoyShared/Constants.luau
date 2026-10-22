@@ -123,6 +123,60 @@ function Constants.ShopItem(id: string): ShopItem?
 	return nil
 end
 
+-- Gamepasses: permanent perks bought with Robux. `effects` use the same keys as
+-- the boost shop and multiply with it, so a 2x pass plus a 2x boost is 4x.
+-- Create each pass on the Roblox site (Creator Hub > the experience >
+-- Monetization > Passes) and paste its id into `passId`. While it is 0 the pass
+-- is "coming soon" in a live server, and a free test toggle in Studio.
+export type GamePass = {
+	id: string,
+	passId: number,
+	name: string,
+	desc: string,
+	effects: { [string]: number },
+}
+
+Constants.GAMEPASSES = {
+	{
+		id = "pass_scrap", passId = 0, name = "2x Scrap",
+		desc = "Double scrap from every run, forever", effects = { scrapMult = 2 },
+	},
+	{
+		id = "pass_fuel", passId = 0, name = "2x Fuel",
+		desc = "Double fuel tank capacity: twice the range", effects = { fuelMult = 2 },
+	},
+	{
+		id = "pass_xp", passId = 0, name = "2x XP",
+		desc = "Double XP from every run", effects = { xpMult = 2 },
+	},
+	{
+		id = "pass_hull", passId = 0, name = "Iron Hide",
+		desc = "+50% vehicle health", effects = { healthMult = 1.5 },
+	},
+	{
+		id = "pass_magnet", passId = 0, name = "Super Magnet",
+		desc = "Grab pickups from twice as far", effects = { pickupMult = 2 },
+	},
+} :: { GamePass }
+
+function Constants.GamePass(id: string): GamePass?
+	for _, pass in Constants.GAMEPASSES do
+		if pass.id == id then
+			return pass
+		end
+	end
+	return nil
+end
+
+function Constants.GamePassByPassId(passId: number): GamePass?
+	for _, pass in Constants.GAMEPASSES do
+		if pass.passId == passId and passId > 0 then
+			return pass
+		end
+	end
+	return nil
+end
+
 -- Trading
 Constants.TRADE_TIMEOUT = 60
 

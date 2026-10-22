@@ -45,6 +45,9 @@ export type PlayerProfile = {
 local DataService = {}
 DataService._profiles = {} :: { [number]: PlayerProfile }
 DataService._store = nil :: DataStore?
+-- Gamepasses a player owns, by Constants.GAMEPASSES id. Roblox is the record of
+-- what was bought, so this is never saved; GamepassService fills it on join.
+DataService._passes = {} :: { [number]: { [string]: boolean } }
 
 local function deepCopy<T>(value: T): T
 	if typeof(value) ~= "table" then
@@ -207,7 +210,28 @@ function DataService.GetPublic(player: Player): any
 	if not profile then
 		return nil
 	end
-	return deepCopy(profile)
+	local copy: any = deepCopy(profile)
+	copy.passes = deepCopy(DataService._passes[player.UserId] or {})
+	return copy
+end
+
+function DataService.SetPass(player: Player, passKey: string, owned: boolean)
+	local passes = DataService._passes[player.UserId]
+	if not passes then
+		passes = {}
+		DataService._passes[player.UserId] = passes
+	end
+	passes[passKey] = if owned then true else nil
+	DataService.Replicate(player)
+end
+
+function DataService.HasPass(player: Player, passKey: string): boolean
+	local passes = DataService._passes[player.UserId]
+	return passes ~= nil and passes[passKey] == true
+end
+
+function DataService.ClearPasses(player: Player)
+	DataService._passes[player.UserId] = nil
 end
 
 function DataService.Replicate(player: Player)
@@ -369,6 +393,12 @@ function DataService.BoostEffect(player: Player, key: string): number
 			total *= item.effects[key]
 		end
 	end
+	for passKey in DataService._passes[player.UserId] or {} do
+		local pass = Constants.GamePass(passKey)
+		if pass and pass.effects[key] then
+			total *= pass.effects[key]
+		end
+	end
 	return total
 end
 
@@ -381,6 +411,12 @@ function DataService.ActiveBoostNames(player: Player): { string }
 			if item and left > 0 then
 				table.insert(names, item.name)
 			end
+		end
+	end
+	for passKey in DataService._passes[player.UserId] or {} do
+		local pass = Constants.GamePass(passKey)
+		if pass then
+			table.insert(names, pass.name)
 		end
 	end
 	table.sort(names)
