@@ -17,6 +17,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local RunHUD = {}
 RunHUD._gui = nil :: ScreenGui?
 RunHUD._onRunEnded = nil :: ((any) -> ())?
+RunHUD._scrap = 0
 
 local function makeBar(parent: Frame, name: string, yScale: number, color: Color3): Frame
 	local back = Instance.new("Frame")
@@ -61,7 +62,7 @@ function RunHUD.Build()
 
 	local top = UIUtil.Frame({
 		Name = "Top",
-		Size = UDim2.new(0, 420, 0, 140),
+		Size = UDim2.new(0, 420, 0, 168),
 		Position = UDim2.new(0.5, 0, 0, 18),
 		AnchorPoint = Vector2.new(0.5, 0),
 		BackgroundColor3 = Color3.fromRGB(10, 12, 16),
@@ -92,6 +93,16 @@ function RunHUD.Build()
 
 	makeBar(top, "Health", 0, Color3.fromRGB(210, 55, 55)).Position = UDim2.new(0, 12, 0, 78)
 	makeBar(top, "Fuel", 0, Color3.fromRGB(240, 170, 45)).Position = UDim2.new(0, 12, 0, 104)
+	UIUtil.Text({
+		Name = "ScrapBalance",
+		Text = "Scrap  " .. tostring(RunHUD._scrap),
+		Font = Enum.Font.GothamBold,
+		Size = UDim2.new(1, -24, 0, 24),
+		Position = UDim2.new(0, 12, 0, 134),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = UIUtil.Colors.Scrap,
+		Parent = top,
+	})
 
 	local convoy = UIUtil.Frame({
 		Name = "Convoy",
@@ -189,6 +200,7 @@ function RunHUD.Update(state: any)
 			table.insert(lines, "Boosts used: " .. table.concat(state.boosts, ", "))
 		end
 		table.insert(lines, string.format("Total scrap: %d    XP: +%d", state.scrapEarned or 0, state.xpEarned or 0))
+		table.insert(lines, string.format("Scrap on hand: %d", RunHUD._scrap))
 		if (state.levelsGained or 0) > 0 then
 			table.insert(lines, string.format("LEVEL UP! Now level %d", state.level or 1))
 		end
@@ -247,9 +259,29 @@ function RunHUD.Update(state: any)
 	end
 end
 
+local function setScrap(scrap: number)
+	RunHUD._scrap = scrap
+	local gui = RunHUD._gui
+	local label = if gui then gui:FindFirstChild("ScrapBalance", true) else nil
+	if label and label:IsA("TextLabel") then
+		label.Text = "Scrap  " .. tostring(scrap)
+	end
+end
+
 function RunHUD.Init(onRunEnded: (any) -> ())
 	RunHUD._onRunEnded = onRunEnded
 	RunHUD.Build()
+	Remotes.Event("DataUpdated").OnClientEvent:Connect(function(data)
+		setScrap(data.scrap or 0)
+	end)
+	task.spawn(function()
+		local ok, data = pcall(function()
+			return Remotes.Function("GetPlayerData"):InvokeServer()
+		end)
+		if ok and data then
+			setScrap(data.scrap or 0)
+		end
+	end)
 	Remotes.Event("RunState").OnClientEvent:Connect(function(state)
 		RunHUD.Update(state)
 	end)
