@@ -838,6 +838,33 @@ for _, family in weaponFamilies do
 	end
 end
 
+-- Store prices. Every purchasable part is priced from its tier, so a higher
+-- rarity always costs more than the one below it, whatever the category. Parts
+-- at cost 0 are lever drops and stay that way.
+local TIER_PRICE = {
+	Common = 40,
+	Uncommon = 85,
+	Rare = 180,
+	Epic = 380,
+	Legendary = 800,
+	Mythic = 1700,
+	Relic = 3600,
+}
+-- Some categories run a little cheaper or dearer than the tier baseline.
+local CATEGORY_PRICE = {
+	Wheels = 0.85,
+	FuelTank = 0.85,
+	Weapon = 1.25,
+}
+
+for _, part in Parts do
+	local price = TIER_PRICE[part.tier]
+	if part.unlockCost > 0 and price then
+		local scaledPrice = price * (CATEGORY_PRICE[part.category] or 1)
+		part.unlockCost = math.floor(scaledPrice / 5 + 0.5) * 5
+	end
+end
+
 function PartsCatalog.Get(id: string): PartDef?
 	return Parts[id]
 end
