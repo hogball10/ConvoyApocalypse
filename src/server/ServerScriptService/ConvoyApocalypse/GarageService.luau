@@ -66,6 +66,14 @@ end
 -- Items on the spinning frame. Eight fit a lever without crowding the corners.
 local REEL_SIZE = 8
 
+-- Where each lever stands, as (x, z) from the garage origin.
+local LEVER_SPOTS: { [string]: { number } } = {
+	Body = { -22, -8 },
+	Drive = { -22, 6 },
+	Gear = { 22, -8 },
+	Weapons = { 22, 6 },
+}
+
 local function leverCost(kind: string): number
 	return Constants.LEVER_COSTS[kind] or 30
 end
@@ -140,16 +148,16 @@ local function buildGaragePad(host: Player, index: number): Folder
 	if ArtKit.Template("Workbench") then
 		prop("Workbench", Vector3.new(-18, 0, 14), math.rad(180))
 		prop("Crate", Vector3.new(18, 0, 12), 0.4)
-		prop("Crate", Vector3.new(21, 0, 8), 1.1)
+		prop("Crate", Vector3.new(23, 0, 14), 1.1)
 		prop("Barrel", Vector3.new(16, 0, 16), 0.6)
 		prop("Barrel", Vector3.new(14.2, 0, 16.4), 0.2)
 		prop("TireStack", Vector3.new(22, 0, 15), 1.4)
-		prop("LampPost", Vector3.new(-24, 0, -6), math.rad(90))
-		prop("LampHead", Vector3.new(-24, 0, -6), math.rad(90))
-		prop("ScrapPile", Vector3.new(-20, 0, 6), 0.5)
+		prop("LampPost", Vector3.new(-24, 0, -18), math.rad(90))
+		prop("LampHead", Vector3.new(-24, 0, -18), math.rad(90))
+		prop("ScrapPile", Vector3.new(-23, 0, 17), 0.5)
 		prop("Hoist", Vector3.new(8, 0, 14), math.rad(200))
 		prop("Barricade", Vector3.new(-8, 0, 16), 0.2)
-		prop("RoadSign", Vector3.new(24, 0, -8), math.rad(-40))
+		prop("RoadSign", Vector3.new(24, 0, -18), math.rad(-40))
 	else
 		anchored("Workbench", Vector3.new(8, 3, 3), Color3.fromRGB(70, 55, 40), CFrame.new(origin + Vector3.new(-18, 2, 14)), folder, Enum.Material.Wood)
 		anchored("CrateA", Vector3.new(3, 3, 3), Color3.fromRGB(90, 70, 40), CFrame.new(origin + Vector3.new(18, 2, 12)), folder, Enum.Material.Wood)
@@ -163,8 +171,8 @@ local function buildGaragePad(host: Player, index: number): Folder
 	-- Vehicle lift platform marking
 	anchored("LiftPad", Vector3.new(10, 0.2, 14), Color3.fromRGB(55, 55, 60), CFrame.new(origin + Vector3.new(0, 0.75, -4)), folder, Enum.Material.DiamondPlate)
 
-	local function buildLever(kind: string, xOffset: number, title: string, cost: number, accentColor: Color3)
-		local rootPos = origin + Vector3.new(xOffset, 0, -2)
+	local function buildLever(kind: string, xOffset: number, zOffset: number, title: string, cost: number, accentColor: Color3)
+		local rootPos = origin + Vector3.new(xOffset, 0, zOffset)
 
 		local pedestal = anchored("LeverBase_" .. kind, Vector3.new(3.4, 1.4, 3.4), Color3.fromRGB(36, 36, 42), CFrame.new(rootPos + Vector3.new(0, 1.3, -2)), folder, Enum.Material.DiamondPlate)
 		pedestal:SetAttribute("LeverKind", kind)
@@ -240,8 +248,11 @@ local function buildGaragePad(host: Player, index: number): Folder
 		status.Parent = signGui
 	end
 
-	for index, entry in PartsCatalog.LeverKinds do
-		buildLever(entry.kind, (index - 2.5) * 14, entry.title, leverCost(entry.kind), entry.color)
+	-- The build plate takes up x -14..14 around the car, so the levers stand on
+	-- the strips beside it, two to a wall, well clear of whatever is being built.
+	for _, entry in PartsCatalog.LeverKinds do
+		local spot = LEVER_SPOTS[entry.kind] or { 22, 0 }
+		buildLever(entry.kind, spot[1], spot[2], entry.title, leverCost(entry.kind), entry.color)
 	end
 
 	local spawn = Instance.new("SpawnLocation")
