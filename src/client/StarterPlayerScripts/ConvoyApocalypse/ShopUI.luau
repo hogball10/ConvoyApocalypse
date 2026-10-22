@@ -147,10 +147,12 @@ local function build()
 	local function setOpen(open: boolean)
 		panel.Visible = open
 		if open then
-			local passes = player.PlayerGui:FindFirstChild("Passes")
-			local passPanel = if passes then passes:FindFirstChild("Panel") else nil
-			if passPanel and passPanel:IsA("GuiObject") then
-				passPanel.Visible = false
+			for _, other in { { "Passes", "Panel" }, { "Trade", "PlayersPanel" } } do
+				local otherGui = player.PlayerGui:FindFirstChild(other[1])
+				local otherPanel = if otherGui then otherGui:FindFirstChild(other[2]) else nil
+				if otherPanel and otherPanel:IsA("GuiObject") then
+					otherPanel.Visible = false
+				end
 			end
 		end
 	end

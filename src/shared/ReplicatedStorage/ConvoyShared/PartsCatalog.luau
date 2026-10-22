@@ -865,6 +865,28 @@ for _, part in Parts do
 	end
 end
 
+-- Copies of a part a player owns that are not sitting on any of their cars.
+-- Only these can be traded away. `profile` is the saved profile or its public
+-- copy; both carry ownedParts and slots.
+function PartsCatalog.FreeCount(profile: any, partId: string): number
+	if typeof(profile) ~= "table" or typeof(profile.ownedParts) ~= "table" then
+		return 0
+	end
+	local free = profile.ownedParts[partId] or 0
+	if typeof(profile.slots) == "table" then
+		for _, slot in profile.slots do
+			if typeof(slot) == "table" and typeof(slot.blocks) == "table" then
+				for _, block in slot.blocks do
+					if block.partId == partId then
+						free -= 1
+					end
+				end
+			end
+		end
+	end
+	return math.max(0, free)
+end
+
 function PartsCatalog.Get(id: string): PartDef?
 	return Parts[id]
 end

@@ -469,15 +469,7 @@ function DataService.GetUnequippedCount(player: Player, partId: string): number
 	if not profile then
 		return 0
 	end
-	local owned = profile.ownedParts[partId] or 0
-	local equipped = 0
-	local loadout = profile.slots[profile.activeSlot].loadout
-	for _, id in loadout do
-		if id == partId then
-			equipped += 1
-		end
-	end
-	return math.max(0, owned - equipped)
+	return PartsCatalog.FreeCount(profile, partId)
 end
 
 function DataService.RemoveOwnedPart(player: Player, partId: string): boolean

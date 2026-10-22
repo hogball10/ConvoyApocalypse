@@ -178,7 +178,12 @@ function Constants.GamePassByPassId(passId: number): GamePass?
 end
 
 -- Trading
-Constants.TRADE_TIMEOUT = 60
+-- Seconds a trade can sit untouched before it is cancelled.
+Constants.TRADE_TIMEOUT = 120
+-- Seconds the other player has to answer a trade request.
+Constants.TRADE_REQUEST_TIMEOUT = 20
+-- Parts one side can put on the table at once.
+Constants.TRADE_MAX_PARTS = 24
 
 -- Lever rolls. Weights are relative chances.
 Constants.RARITY_ODDS = {

@@ -1,7 +1,9 @@
 --!strict
 --[[
-	Garage-only trading. Both players offer unequipped parts + optional scrap.
-	Both must confirm. Host/final inventory validated server-side.
+	Garage-only trading. One player asks, the other accepts; then both put
+	unplaced parts (several copies allowed) and scrap on the table and both
+	confirm. Changing an offer un-confirms both sides. Everything is
+	re-validated server-side the moment the swap happens.
 ]]
 
 local Players = game:GetService("Players")
@@ -13,10 +15,11 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local PartsCatalog = require(Shared:WaitForChild("PartsCatalog"))
 
 local DataService = require(script.Parent:WaitForChild("DataService"))
+local ConvoyRunService = require(script.Parent:WaitForChild("ConvoyRunService"))
 local GarageService -- delayed require to avoid cycle
 
 export type Offer = {
-	parts: { string },
+	parts: { string }, -- one entry per copy, so duplicates repeat
 	scrap: number,
 	confirmed: boolean,
 }
@@ -26,12 +29,19 @@ export type TradeSession = {
 	a: number, -- userId
 	b: number,
 	offers: { [number]: Offer },
-	createdAt: number,
+	lastActive: number,
+}
+
+export type Request = {
+	from: number,
+	at: number,
 }
 
 local TradeService = {}
 TradeService._trades = {} :: { [string]: TradeSession }
 TradeService._byPlayer = {} :: { [number]: string }
+-- A request waits here, keyed by the player being asked, until they answer.
+TradeService._pending = {} :: { [number]: Request }
 
 local function notify(player: Player, msg: string)
 	Remotes.Event("Notification"):FireClient(player, msg)
@@ -79,11 +89,130 @@ local function cancel(tradeId: string, reason: string?)
 	end
 end
 
+-- Drops a waiting request and tells the asked player to close the popup.
+local function clearRequest(targetUserId: number)
+	if not TradeService._pending[targetUserId] then
+		return
+	end
+	TradeService._pending[targetUserId] = nil
+	local target = getPlayer(targetUserId)
+	if target then
+		Remotes.Event("TradeUpdate"):FireClient(target, { requestEnded = true })
+	end
+end
+
+local function tally(list: { string }): { [string]: number }
+	local counts = {}
+	for _, partId in list do
+		counts[partId] = (counts[partId] or 0) + 1
+	end
+	return counts
+end
+
+-- Can this player really hand over these parts and this much scrap right now?
+local function canCover(player: Player, offer: Offer): boolean
+	local profile = DataService.Get(player)
+	if not profile or profile.scrap < offer.scrap then
+		return false
+	end
+	for partId, count in tally(offer.parts) do
+		if DataService.GetUnequippedCount(player, partId) < count then
+			return false
+		end
+	end
+	return true
+end
+
+-- Trading only works while both are in the same garage and not out on a run.
+local function stillTogether(a: Player, b: Player): boolean
+	return not ConvoyRunService.IsInRun(a)
+		and not ConvoyRunService.IsInRun(b)
+		and GarageService.AreInSameGarage(a, b)
+end
+
+local function bothFree(a: Player, b: Player): boolean
+	return not TradeService._byPlayer[a.UserId] and not TradeService._byPlayer[b.UserId] and stillTogether(a, b)
+end
+
+local function open(a: Player, b: Player)
+	local id = "trade_" .. tostring(a.UserId) .. "_" .. tostring(b.UserId) .. "_" .. tostring(os.time())
+	local trade: TradeSession = {
+		id = id,
+		a = a.UserId,
+		b = b.UserId,
+		offers = {
+			[a.UserId] = { parts = {}, scrap = 0, confirmed = false },
+			[b.UserId] = { parts = {}, scrap = 0, confirmed = false },
+		},
+		lastActive = os.clock(),
+	}
+	TradeService._trades[id] = trade
+	TradeService._byPlayer[a.UserId] = id
+	TradeService._byPlayer[b.UserId] = id
+	replicate(trade)
+end
+
+function TradeService.Execute(trade: TradeSession)
+	local pa, pb = getPlayer(trade.a), getPlayer(trade.b)
+	if not pa or not pb then
+		cancel(trade.id, "Player left")
+		return
+	end
+	if not stillTogether(pa, pb) then
+		cancel(trade.id, "Trade cancelled: you must both stay in the garage")
+		return
+	end
+
+	local offerA = trade.offers[trade.a]
+	local offerB = trade.offers[trade.b]
+	local profileA = DataService.Get(pa)
+	local profileB = DataService.Get(pb)
+	if not profileA or not profileB then
+		cancel(trade.id, "Data missing")
+		return
+	end
+
+	-- Re-validate: anything could have changed since the offers were made.
+	if not canCover(pa, offerA) or not canCover(pb, offerB) then
+		cancel(trade.id, "Something changed, so the trade was cancelled")
+		return
+	end
+
+	-- Transfer scrap
+	profileA.scrap += offerB.scrap - offerA.scrap
+	profileB.scrap += offerA.scrap - offerB.scrap
+
+	-- Transfer parts
+	for _, partId in offerA.parts do
+		DataService.RemoveOwnedPart(pa, partId)
+		DataService.AddOwnedPart(pb, partId)
+	end
+	for _, partId in offerB.parts do
+		DataService.RemoveOwnedPart(pb, partId)
+		DataService.AddOwnedPart(pa, partId)
+	end
+
+	TradeService._byPlayer[trade.a] = nil
+	TradeService._byPlayer[trade.b] = nil
+	TradeService._trades[trade.id] = nil
+
+	DataService.Replicate(pa)
+	DataService.Replicate(pb)
+	DataService.Save(pa)
+	DataService.Save(pb)
+
+	notify(pa, "Trade complete!")
+	notify(pb, "Trade complete!")
+	Remotes.Event("TradeUpdate"):FireClient(pa, { id = trade.id, completed = true })
+	Remotes.Event("TradeUpdate"):FireClient(pb, { id = trade.id, completed = true })
+end
+
 function TradeService.Init()
 	GarageService = require(script.Parent:WaitForChild("GarageService"))
 
-	Remotes.Event("TradeRequest").OnServerEvent:Connect(function(player, targetUserId: number)
-		if typeof(targetUserId) ~= "number" then
+	-- Step 1: ask. Nothing opens until the other player says yes.
+	Remotes.Event("TradeRequest").OnServerEvent:Connect(function(player, targetUserId: any)
+		if typeof(targetUserId) ~= "number" or targetUserId == player.UserId then
 			return
 		end
 		if TradeService._byPlayer[player.UserId] then
@@ -99,70 +228,93 @@ function TradeService.Init()
 			notify(player, "They are busy trading")
 			return
 		end
-		-- Garage only
+		if ConvoyRunService.IsInRun(player) or ConvoyRunService.IsInRun(target) then
+			notify(player, "Trading only in the garage")
+			return
+		end
 		if not GarageService.AreInSameGarage(player, target) then
 			notify(player, "Trading only in the garage")
 			return
 		end
+		local waiting = TradeService._pending[targetUserId]
+		if waiting and waiting.from ~= player.UserId then
+			notify(player, target.Name .. " already has a trade request")
+			return
+		end
+		-- One open request per player: a new one replaces any earlier one.
+		for askedId, request in TradeService._pending do
+			if request.from == player.UserId and askedId ~= targetUserId then
+				clearRequest(askedId)
+			end
+		end
 
-		local id = "trade_" .. tostring(player.UserId) .. "_" .. tostring(targetUserId) .. "_" .. tostring(os.time())
-		local trade: TradeSession = {
-			id = id,
-			a = player.UserId,
-			b = targetUserId,
-			offers = {
-				[player.UserId] = { parts = {}, scrap = 0, confirmed = false },
-				[targetUserId] = { parts = {}, scrap = 0, confirmed = false },
-			},
-			createdAt = os.clock(),
-		}
-		TradeService._trades[id] = trade
-		TradeService._byPlayer[player.UserId] = id
-		TradeService._byPlayer[targetUserId] = id
-		replicate(trade)
-		notify(target, player.Name .. " wants to trade")
-		notify(player, "Trade opened with " .. target.Name)
+		TradeService._pending[targetUserId] = { from = player.UserId, at = os.clock() }
+		Remotes.Event("TradeUpdate"):FireClient(target, { request = { fromUserId = player.UserId, fromName = player.Name } })
+		notify(player, "Trade request sent to " .. target.Name)
 	end)
 
+	-- Step 2: answer.
+	Remotes.Event("TradeRespond").OnServerEvent:Connect(function(player, fromUserId: any, accept: any)
+		if typeof(fromUserId) ~= "number" or typeof(accept) ~= "boolean" then
+			return
+		end
+		local request = TradeService._pending[player.UserId]
+		if not request or request.from ~= fromUserId then
+			return
+		end
+		clearRequest(player.UserId)
+
+		local asker = getPlayer(fromUserId)
+		if not asker then
+			return
+		end
+		if not accept then
+			notify(asker, player.Name .. " declined the trade")
+			return
+		end
+		if not bothFree(asker, player) then
+			notify(asker, "Trade could not start")
+			notify(player, "Trade could not start")
+			return
+		end
+		open(asker, player)
+		notify(asker, player.Name .. " accepted. Choose what to offer")
+	end)
+
+	-- Setting your side of the table. Every change un-confirms both players.
 	Remotes.Event("TradeUpdate").OnServerEvent:Connect(function(player, offerParts: any, scrap: any)
 		local tradeId = TradeService._byPlayer[player.UserId]
 		local trade = tradeId and TradeService._trades[tradeId]
 		if not trade then
 			return
 		end
-		if typeof(offerParts) ~= "table" or typeof(scrap) ~= "number" then
+		if typeof(offerParts) ~= "table" or typeof(scrap) ~= "number" or scrap ~= scrap or scrap == math.huge then
 			return
 		end
 		scrap = math.max(0, math.floor(scrap))
 
-		-- Validate parts are unequipped owned
-		local clean = {}
-		local seen = {}
+		local clean: { string } = {}
 		for _, partId in offerParts do
-			if typeof(partId) == "string" and PartsCatalog.Get(partId) and not seen[partId] then
-				seen[partId] = true
+			if typeof(partId) == "string" and PartsCatalog.Get(partId) then
 				table.insert(clean, partId)
+				if #clean > Constants.TRADE_MAX_PARTS then
+					notify(player, "You can offer up to " .. tostring(Constants.TRADE_MAX_PARTS) .. " parts")
+					return
+				end
 			end
 		end
-		-- Count duplicates properly: for prototype each partId once in offer
-		for _, partId in clean do
-			if DataService.GetUnequippedCount(player, partId) < 1 then
-				notify(player, "Can only trade unequipped owned parts")
-				return
-			end
-		end
-		local profile = DataService.Get(player)
-		if not profile or profile.scrap < scrap then
-			notify(player, "Not enough scrap")
+
+		local offer: Offer = { parts = clean, scrap = scrap, confirmed = false }
+		if not canCover(player, offer) then
+			notify(player, "You can only offer parts and scrap you have free")
+			replicate(trade)
 			return
 		end
 
-		local offer = trade.offers[player.UserId]
-		offer.parts = clean
-		offer.scrap = scrap
-		offer.confirmed = false
+		trade.offers[player.UserId] = offer
 		trade.offers[trade.a].confirmed = false
 		trade.offers[trade.b].confirmed = false
+		trade.lastActive = os.clock()
 		replicate(trade)
 	end)
 
@@ -172,10 +324,16 @@ function TradeService.Init()
 		if not trade then
 			return
 		end
+		local offerA, offerB = trade.offers[trade.a], trade.offers[trade.b]
+		if #offerA.parts + #offerB.parts == 0 and offerA.scrap + offerB.scrap == 0 then
+			notify(player, "Put something on the table first")
+			return
+		end
 		trade.offers[player.UserId].confirmed = true
+		trade.lastActive = os.clock()
 		replicate(trade)
 
-		if trade.offers[trade.a].confirmed and trade.offers[trade.b].confirmed then
+		if offerA.confirmed and offerB.confirmed then
 			TradeService.Execute(trade)
 		end
 	end)
@@ -187,83 +345,43 @@ function TradeService.Init()
 		end
 	end)
 
-	-- Timeout sweeper
+	Players.PlayerRemoving:Connect(function(player)
+		local tradeId = TradeService._byPlayer[player.UserId]
+		if tradeId then
+			cancel(tradeId, player.Name .. " left the game")
+		end
+		clearRequest(player.UserId)
+		for askedId, request in TradeService._pending do
+			if request.from == player.UserId then
+				clearRequest(askedId)
+			end
+		end
+	end)
+
+	-- Sweeper: stale requests, idle trades, and anyone who wandered off.
 	task.spawn(function()
 		while true do
-			task.wait(5)
+			task.wait(2)
 			local now = os.clock()
+			for askedId, request in TradeService._pending do
+				if now - request.at > Constants.TRADE_REQUEST_TIMEOUT then
+					local asker = getPlayer(request.from)
+					if asker then
+						notify(asker, "No answer to your trade request")
+					end
+					clearRequest(askedId)
+				end
+			end
 			for id, trade in TradeService._trades do
-				if now - trade.createdAt > Constants.TRADE_TIMEOUT then
+				local pa, pb = getPlayer(trade.a), getPlayer(trade.b)
+				if now - trade.lastActive > Constants.TRADE_TIMEOUT then
 					cancel(id, "Trade timed out")
+				elseif pa and pb and not stillTogether(pa, pb) then
+					cancel(id, "Trade cancelled: you must both stay in the garage")
 				end
 			end
 		end
 	end)
-end
-
-function TradeService.Execute(trade: TradeSession)
-	local pa, pb = getPlayer(trade.a), getPlayer(trade.b)
-	if not pa or not pb then
-		cancel(trade.id, "Player left")
-		return
-	end
-
-	local offerA = trade.offers[trade.a]
-	local offerB = trade.offers[trade.b]
-	local profileA = DataService.Get(pa)
-	local profileB = DataService.Get(pb)
-	if not profileA or not profileB then
-		cancel(trade.id, "Data missing")
-		return
-	end
-
-	-- Re-validate
-	if profileA.scrap < offerA.scrap or profileB.scrap < offerB.scrap then
-		cancel(trade.id, "Scrap changed — cancelled")
-		return
-	end
-	for _, partId in offerA.parts do
-		if DataService.GetUnequippedCount(pa, partId) < 1 then
-			cancel(trade.id, "Parts changed — cancelled")
-			return
-		end
-	end
-	for _, partId in offerB.parts do
-		if DataService.GetUnequippedCount(pb, partId) < 1 then
-			cancel(trade.id, "Parts changed — cancelled")
-			return
-		end
-	end
-
-	-- Transfer scrap
-	profileA.scrap -= offerA.scrap
-	profileB.scrap -= offerB.scrap
-	profileA.scrap += offerB.scrap
-	profileB.scrap += offerA.scrap
-
-	-- Transfer parts
-	for _, partId in offerA.parts do
-		DataService.RemoveOwnedPart(pa, partId)
-		DataService.AddOwnedPart(pb, partId)
-	end
-	for _, partId in offerB.parts do
-		DataService.RemoveOwnedPart(pb, partId)
-		DataService.AddOwnedPart(pa, partId)
-	end
-
-	DataService.Replicate(pa)
-	DataService.Replicate(pb)
-	DataService.Save(pa)
-	DataService.Save(pb)
-
-	TradeService._byPlayer[trade.a] = nil
-	TradeService._byPlayer[trade.b] = nil
-	TradeService._trades[trade.id] = nil
-
-	notify(pa, "Trade complete!")
-	notify(pb, "Trade complete!")
-	Remotes.Event("TradeUpdate"):FireClient(pa, { id = trade.id, completed = true })
-	Remotes.Event("TradeUpdate"):FireClient(pb, { id = trade.id, completed = true })
 end
 
 return TradeService
