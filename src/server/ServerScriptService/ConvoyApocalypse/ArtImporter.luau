@@ -76,7 +76,15 @@ local function buildEditablePart(data: PartData): MeshPart?
 		return nil
 	end
 
-	local editable = AssetService:CreateEditableMesh()
+	-- Live servers can refuse to make an EditableMesh; that must never take
+	-- the loader thread down with it, or Build would wait on it forever.
+	local made, editable = pcall(function()
+		return AssetService:CreateEditableMesh()
+	end)
+	if not made or not editable then
+		warn("[ArtImporter] EditableMesh unavailable, so", data.name, "will be skipped:", editable)
+		return nil
+	end
 	local ids = table.create(#verts // 3)
 	for i = 1, #verts - 2, 3 do
 		ids[#ids + 1] = editable:AddVertex(Vector3.new(verts[i], verts[i + 1], verts[i + 2]))
@@ -278,7 +286,13 @@ function ArtImporter.Build(): boolean
 			end
 			pending += 1
 			task.spawn(function()
-				local instance = buildItem(item)
+				-- Whatever goes wrong, this item must still report back: Build
+				-- waits for every one of them.
+				local okItem, instance = pcall(buildItem, item)
+				if not okItem then
+					warn("[ArtImporter] could not build", item.name, instance)
+					instance = nil
+				end
 				if instance then
 					instance:SetAttribute("ArtSig", sig)
 					if existing then
