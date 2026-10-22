@@ -217,6 +217,9 @@ function RunHUD.Update(state: any)
 		hFill.Size = UDim2.new(math.clamp(hp, 0, 1), 0, 1, 0)
 		fFill.Size = UDim2.new(math.clamp(fp, 0, 1), 0, 1, 0)
 		hLabel.Text = string.format("HP  %d / %d", math.floor(my.health or 0), math.floor(my.maxHealth or 0))
+		if (my.maxShield or 0) > 0 then
+			hLabel.Text ..= string.format("   +%d shield", math.floor(my.shield or 0))
+		end
 		fLabel.Text = string.format("FUEL  %d / %d", math.floor(my.fuel or 0), math.floor(my.maxFuel or 0))
 	end
 

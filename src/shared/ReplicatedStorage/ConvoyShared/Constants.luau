@@ -62,22 +62,26 @@ Constants.TRADE_TIMEOUT = 60
 
 -- Lever rolls. Weights are relative chances.
 Constants.RARITY_ODDS = {
-	{ tier = "Common", weight = 52 },
-	{ tier = "Rare", weight = 27 },
-	{ tier = "Epic", weight = 13 },
-	{ tier = "Legendary", weight = 6 },
-	{ tier = "Mythic", weight = 2 },
+	{ tier = "Common", weight = 92 },
+	{ tier = "Uncommon", weight = 50 },
+	{ tier = "Rare", weight = 30 },
+	{ tier = "Epic", weight = 16 },
+	{ tier = "Legendary", weight = 8 },
+	{ tier = "Mythic", weight = 3 },
+	{ tier = "Relic", weight = 1 },
 }
 
 -- Tiers
-Constants.TIERS = { "Scrap", "Common", "Rare", "Epic", "Legendary", "Mythic" }
+Constants.TIERS = { "Scrap", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Relic" }
 Constants.TIER_COLORS = {
 	Scrap = Color3.fromRGB(140, 140, 140),
 	Common = Color3.fromRGB(180, 200, 220),
+	Uncommon = Color3.fromRGB(110, 205, 120),
 	Rare = Color3.fromRGB(70, 140, 255),
 	Epic = Color3.fromRGB(170, 70, 255),
 	Legendary = Color3.fromRGB(255, 170, 40),
 	Mythic = Color3.fromRGB(255, 60, 120),
+	Relic = Color3.fromRGB(110, 255, 235),
 }
 
 return Constants

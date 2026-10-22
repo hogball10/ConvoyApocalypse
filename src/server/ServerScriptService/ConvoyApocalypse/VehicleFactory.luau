@@ -126,6 +126,11 @@ function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: 
 	model:SetAttribute("PickupMult", stats.pickupMult)
 	model:SetAttribute("ScrapMult", stats.scrapMult)
 	model:SetAttribute("WeaponKind", stats.weaponKind)
+	model:SetAttribute("MaxShield", stats.shieldMax)
+	model:SetAttribute("Shield", stats.shieldMax)
+	model:SetAttribute("ShieldRegen", stats.shieldRegen)
+	model:SetAttribute("FuelPerKill", stats.fuelPerKill)
+	model:SetAttribute("LastHit", 0)
 	model:SetAttribute("Kills", 0)
 	model:SetAttribute("Alive", true)
 

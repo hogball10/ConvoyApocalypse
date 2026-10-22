@@ -576,9 +576,13 @@ end
 -- roll, the price and the odds.
 function GarageService.LeverIdleText(kind: string, title: string, cost: number, targetId: string?): string
 	local target = PartsCatalog.FindTarget(kind, targetId or PartsCatalog.TargetsFor(kind)[1].id)
+	local total = 0
+	for _, entry in Constants.RARITY_ODDS do
+		total += entry.weight
+	end
 	local odds = {}
 	for _, entry in Constants.RARITY_ODDS do
-		table.insert(odds, string.format("%s %d%%", entry.tier, entry.weight))
+		table.insert(odds, string.format("%s %.1f%%", entry.tier, entry.weight / total * 100))
 	end
 	return string.format("%s\nRolling: %s\nBuy %d scrap\n%s", title, if target then target.label else "?", cost, table.concat(odds, "  "))
 end

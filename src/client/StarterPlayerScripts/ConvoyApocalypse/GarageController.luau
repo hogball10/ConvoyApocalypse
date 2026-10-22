@@ -72,7 +72,7 @@ local inventoryScroll: ScrollingFrame? = nil
 local inventoryButton: TextButton? = nil
 local holdPart: (string) -> ()
 
-local TIER_RANK = { Scrap = 0, Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+local TIER_RANK = { Scrap = 0, Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Relic = 7 }
 
 -- Tabs along the top of the inventory. `category` nil means everything.
 local INVENTORY_TABS: { { label: string, category: string? } } = {

@@ -447,6 +447,12 @@ end
 local function creditKill(session: RunSession, participant: Participant, zombie: Model)
 	participant.kills += 1
 	participant.vehicle:SetAttribute("Kills", participant.kills)
+	local siphon = (participant.vehicle:GetAttribute("FuelPerKill") :: number?) or 0
+	if siphon > 0 then
+		local maxFuel = participant.vehicle:GetAttribute("MaxFuel") :: number
+		local fuel = participant.vehicle:GetAttribute("Fuel") :: number
+		participant.vehicle:SetAttribute("Fuel", math.min(maxFuel, fuel + siphon))
+	end
 	if zombie:GetAttribute("Boss") == true then
 		participant.bossKills += 1
 		for _, p in session.participants do
@@ -660,6 +666,28 @@ local function fireWeapon(session: RunSession, participant: Participant, body: B
 				hit(session, participant, t.model, damage)
 			end
 		end
+	elseif kind == "mine" then
+		-- Lays a mine just behind the car; anything chasing it sets it off.
+		local drop = body.CFrame:PointToWorldSpace(Vector3.new(0, 0, 7))
+		local victims = {}
+		for _, t in all do
+			if t.model.Parent and (t.pos - drop).Magnitude <= 13 then
+				table.insert(victims, t)
+			end
+		end
+		if #victims == 0 then
+			return
+		end
+		local blast = Instance.new("Explosion")
+		blast.Position = drop
+		blast.BlastRadius = 10
+		blast.BlastPressure = 0
+		blast.DestroyJointRadiusPercent = 0
+		blast.ExplosionType = Enum.ExplosionType.NoCraters
+		blast.Parent = Workspace
+		for _, t in victims do
+			hit(session, participant, t.model, damage)
+		end
 	elseif kind == "ram" then
 		return
 	else
@@ -679,6 +707,17 @@ function ConvoyRunService.DamageVehicle(session: RunSession, participant: Partic
 	end
 	local reduction = vehicle:GetAttribute("DamageReduction") :: number or 0
 	local damage = rawDamage * (1 - math.clamp(reduction, 0, 0.9))
+	-- A shield soaks damage first and stops recharging for a few seconds.
+	local shield = (vehicle:GetAttribute("Shield") :: number?) or 0
+	if shield > 0 then
+		vehicle:SetAttribute("LastHit", os.clock())
+		local absorbed = math.min(shield, damage)
+		vehicle:SetAttribute("Shield", shield - absorbed)
+		damage -= absorbed
+		if damage <= 0 then
+			return
+		end
+	end
 	local health = (vehicle:GetAttribute("Health") :: number) - damage
 	vehicle:SetAttribute("Health", health)
 	if health <= 0 then
@@ -938,6 +977,13 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		fuel = math.max(0, fuel - drain * dt)
 		vehicle:SetAttribute("Fuel", fuel)
 
+		-- Shield recharges once it has gone a few seconds without a hit
+		local maxShield = (vehicle:GetAttribute("MaxShield") :: number?) or 0
+		if maxShield > 0 and os.clock() - ((vehicle:GetAttribute("LastHit") :: number?) or 0) > 3 then
+			local shield = vehicle:GetAttribute("Shield") :: number
+			vehicle:SetAttribute("Shield", math.min(maxShield, shield + (vehicle:GetAttribute("ShieldRegen") :: number) * dt))
+		end
+
 		-- Repair utility
 		local repair = vehicle:GetAttribute("RepairPerSec") :: number
 		if repair > 0 then
@@ -1058,6 +1104,8 @@ function ConvoyRunService.Serialize(session: RunSession): any
 			maxHealth = v:GetAttribute("MaxHealth"),
 			fuel = v:GetAttribute("Fuel"),
 			maxFuel = v:GetAttribute("MaxFuel"),
+			shield = v:GetAttribute("Shield"),
+			maxShield = v:GetAttribute("MaxShield"),
 			kills = participant.kills,
 			alive = participant.alive,
 			name = participant.player.Name,

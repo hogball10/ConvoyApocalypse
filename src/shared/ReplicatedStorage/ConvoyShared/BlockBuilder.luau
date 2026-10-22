@@ -41,11 +41,45 @@ local SKIN_NAME = {
 	rail = "RailSkin",
 	ram = "RamSkin",
 	seat = "SeatSkin",
+	shotgun = "ShotgunSkin",
+	rocket = "RocketSkin",
+	mine = "MineSkin",
+	armor = "ArmorSkin",
+	utility = "UtilityRepairSkin",
 }
 
-local function attachSkin(kind: string, host: BasePart, model: Model, cf: CFrame, tierColor: Color3)
+-- Variants with their own Blender model. Matched by part id prefix, before the
+-- per-kind default above.
+local SKIN_BY_PREFIX = {
+	{ "engine_turbo", "EngineTurboSkin" },
+	{ "engine_diesel", "EngineDieselSkin" },
+	{ "engine_rotary", "EngineRotarySkin" },
+	{ "fuel_barrel", "FuelBarrelSkin" },
+	{ "fuel_cell", "FuelCellSkin" },
+	{ "armor_spiked", "ArmorSpikedSkin" },
+	{ "armor_heavy", "ArmorHeavySkin" },
+	{ "utility_boost", "UtilityBoostSkin" },
+	{ "utility_magnet", "UtilityMagnetSkin" },
+	{ "utility_salvage", "UtilitySalvageSkin" },
+	{ "utility_shield", "UtilityShieldSkin" },
+	{ "utility_siphon", "UtilitySiphonSkin" },
+}
+
+local function skinNameFor(partId: string, kind: string): string?
+	for _, entry in SKIN_BY_PREFIX do
+		if string.sub(partId, 1, #entry[1]) == entry[1] then
+			return entry[2]
+		end
+	end
+	return SKIN_NAME[kind]
+end
+
+-- Rarity is readable on the model itself: Rare and up carry a trim in the
+-- tier colour, Mythic and Relic also glow.
+local TIER_RANK = { Scrap = 0, Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Relic = 7 }
+
+local function attachSkin(skinName: string?, kind: string, host: BasePart, model: Model, cf: CFrame, tierColor: Color3)
 	local folder = ReplicatedStorage:FindFirstChild("ConvoyArtSkins")
-	local skinName = SKIN_NAME[kind]
 	if not folder or not skinName then
 		return
 	end
@@ -129,6 +163,8 @@ function BlockBuilder.Create(partId: string, cf: CFrame): Model
 	local size = PartsCatalog.BlockSize(partId, 0)
 	local tier = if info then info.tier else "Common"
 	local color = Constants.TIER_COLORS[tier] or Color3.fromRGB(180, 180, 190)
+	-- Plain blocks get a darkened body so the tier trim and studs stand out.
+	local bodyColor = color:Lerp(Color3.fromRGB(38, 40, 46), 0.5)
 	local model = Instance.new("Model")
 	model.Name = partId
 
@@ -157,8 +193,8 @@ function BlockBuilder.Create(partId: string, cf: CFrame): Model
 		local slope = Instance.new("WedgePart")
 		slope.Name = "Slope"
 		slope.Size = size
-		slope.Color = color
-		slope.Material = Enum.Material.CorrodedMetal
+		slope.Color = bodyColor
+		slope.Material = Enum.Material.Metal
 		slope.CFrame = cf
 		slope.Parent = model
 		studs(slope, model, color)
@@ -282,7 +318,7 @@ function BlockBuilder.Create(partId: string, cf: CFrame): Model
 		weld(cushion, back)
 		model.PrimaryPart = cushion
 	else
-		local body = box("Brick", size, color, Vector3.zero, Enum.Material.CorrodedMetal)
+		local body = box("Brick", size, bodyColor, Vector3.zero, Enum.Material.Metal)
 		studs(body, model, color)
 		model.PrimaryPart = body
 	end
@@ -294,8 +330,33 @@ function BlockBuilder.Create(partId: string, cf: CFrame): Model
 		end
 	end
 	model:SetAttribute("PartId", partId)
-	if model.PrimaryPart then
-		attachSkin(kind, model.PrimaryPart, model, cf, color)
+	local host = model.PrimaryPart
+	if host then
+		attachSkin(skinNameFor(partId, kind), kind, host, model, cf, color)
+		local rank = TIER_RANK[tier] or 1
+		if rank >= 3 and (kind == "brick" or kind == "plate" or kind == "wedge") then
+			local trim = box("Trim", Vector3.new(size.X, 0.12, 0.12), color, Vector3.new(0, size.Y / 2, -size.Z / 2 + 0.06), Enum.Material.Neon)
+			trim.CanCollide = false
+			trim.Massless = true
+			weld(host, trim)
+		end
+		if rank >= 6 then
+			local glow = Instance.new("PointLight")
+			glow.Color = color
+			glow.Range = 9
+			glow.Brightness = if rank >= 7 then 1.6 else 1
+			glow.Parent = host
+		end
+		if rank >= 7 then
+			local sparks = Instance.new("ParticleEmitter")
+			sparks.Color = ColorSequence.new(color)
+			sparks.LightEmission = 1
+			sparks.Rate = 6
+			sparks.Lifetime = NumberRange.new(0.6, 1.1)
+			sparks.Speed = NumberRange.new(0.5, 1.5)
+			sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.18), NumberSequenceKeypoint.new(1, 0) })
+			sparks.Parent = host
+		end
 	end
 	return model
 end

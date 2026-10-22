@@ -107,6 +107,7 @@ PartsCatalog.DriveTargets = {
 	{ id = "engine", label = "Engine", short = "ENGINE", category = "Engine", prefix = "engine" },
 	{ id = "turbo", label = "Turbo Engine", short = "TURBO", category = "Engine", prefix = "engine_turbo" },
 	{ id = "diesel", label = "Diesel Engine", short = "DIESEL", category = "Engine", prefix = "engine_diesel" },
+	{ id = "rotary", label = "Rotary Engine", short = "ROTARY", category = "Engine", prefix = "engine_rotary" },
 	{ id = "wheels", label = "Wheels", short = "WHEELS", category = "Wheels", prefix = "wheels" },
 	{ id = "mud", label = "Mud Tires", short = "MUD", category = "Wheels", prefix = "wheels_mud" },
 	{ id = "racing", label = "Racing Slicks", short = "SLICKS", category = "Wheels", prefix = "wheels_race" },
@@ -125,6 +126,8 @@ PartsCatalog.GearTargets = {
 	{ id = "boost", label = "Nitro", short = "NITRO", category = "Utility", prefix = "utility_boost" },
 	{ id = "magnet", label = "Scrap Magnet", short = "MAGNET", category = "Utility", prefix = "utility_magnet" },
 	{ id = "salvage", label = "Salvage Rig", short = "SALVAGE", category = "Utility", prefix = "utility_salvage" },
+	{ id = "shield", label = "Shield Generator", short = "SHIELD", category = "Utility", prefix = "utility_shield" },
+	{ id = "siphon", label = "Fuel Siphon", short = "SIPHON", category = "Utility", prefix = "utility_siphon" },
 } :: { LeverTarget }
 
 PartsCatalog.WeaponTargets = {
@@ -135,6 +138,7 @@ PartsCatalog.WeaponTargets = {
 	{ id = "ram", label = "Ram", short = "RAM", category = "Weapon", prefix = "weapon_ram" },
 	{ id = "shotgun", label = "Shotgun", short = "SHOT", category = "Weapon", prefix = "weapon_shotgun" },
 	{ id = "rocket", label = "Rocket Pod", short = "ROCKET", category = "Weapon", prefix = "weapon_rocket" },
+	{ id = "mine", label = "Mine Layer", short = "MINE", category = "Weapon", prefix = "weapon_mine" },
 } :: { LeverTarget }
 
 local Parts: { [string]: PartDef } = {
@@ -463,9 +467,9 @@ local Parts: { [string]: PartDef } = {
 	},
 }
 
-local TIER_NAMES = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
-local TIER_MULT = { Common = 1, Rare = 1.45, Epic = 2.05, Legendary = 2.8, Mythic = 3.7 }
-local TIER_INDEX = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Relic" }
+local TIER_MULT = { Common = 1, Uncommon = 1.2, Rare = 1.45, Epic = 2.05, Legendary = 2.8, Mythic = 3.7, Relic = 4.8 }
+local TIER_INDEX = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Relic = 7 }
 
 local function scaled(base: number, tier: string): number
 	return math.floor(base * TIER_MULT[tier] + 0.5)
@@ -475,35 +479,73 @@ local function addPart(def: PartDef)
 	Parts[def.id] = def
 end
 
--- Mythic sits above Legendary. The hand-written families end at Legendary, so
--- the top rung is derived from it rather than typed out a sixth time.
-local MYTHIC_NAMES = {
-	chassis = "Doomsday Hull",
-	engine = "Quantum Drive",
-	wheels = "Hover Rings",
-	fuel = "Singularity Cell",
-	armor = "Void Plating",
+-- The hand-written families (chassis, engine, wheels, fuel, armor) run
+-- Common..Legendary. The tiers around them are derived instead of typed out:
+-- Uncommon sits halfway between Common and Rare, Mythic is a boosted
+-- Legendary and Relic a boosted Mythic.
+local EXTRA_NAMES = {
+	Uncommon = {
+		chassis = "Welded Frame",
+		engine = "Tuned Four",
+		wheels = "Grip Tires",
+		fuel = "Twin Drum",
+		armor = "Bolted Panels",
+	},
+	Mythic = {
+		chassis = "Doomsday Hull",
+		engine = "Quantum Drive",
+		wheels = "Hover Rings",
+		fuel = "Singularity Cell",
+		armor = "Void Plating",
+	},
+	Relic = {
+		chassis = "Ancient Colossus",
+		engine = "Reactor Core",
+		wheels = "Gravity Rollers",
+		fuel = "Star Core",
+		armor = "Aegis Plate",
+	},
 }
-local MYTHIC_BOOST = 1.3
 
-for _, legendary in table.clone(Parts) do
-	local family = string.match(legendary.id, "^(%a+)_legendary$")
-	local mythicName = family and MYTHIC_NAMES[family]
-	if mythicName then
+local function boosted(from: PartDef, family: string, tier: string, factor: number)
+	local stats: { [string]: number } = {}
+	for key, value in from.stats do
+		-- Hardpoints are a count, not a magnitude.
+		stats[key] = if key == "hardpoints" then value + 1 else value * factor
+	end
+	addPart({
+		id = family .. "_" .. string.lower(tier),
+		name = EXTRA_NAMES[tier][family],
+		category = from.category,
+		tier = tier,
+		weight = math.floor(from.weight * 1.1),
+		unlockCost = from.unlockCost * 2,
+		stats = stats,
+		description = from.description,
+	})
+end
+
+for family in EXTRA_NAMES.Mythic do
+	local legendary = Parts[family .. "_legendary"]
+	if legendary then
+		boosted(legendary, family, "Mythic", 1.3)
+		boosted(Parts[family .. "_mythic"], family, "Relic", 1.25)
+	end
+	local common, rare = Parts[family .. "_common"], Parts[family .. "_rare"]
+	if common and rare then
 		local stats: { [string]: number } = {}
-		for key, value in legendary.stats do
-			-- Hardpoints are a count, not a magnitude.
-			stats[key] = if key == "hardpoints" then value + 1 else value * MYTHIC_BOOST
+		for key, value in common.stats do
+			stats[key] = (value + (rare.stats[key] or value)) / 2
 		end
 		addPart({
-			id = family .. "_mythic",
-			name = mythicName,
-			category = legendary.category,
-			tier = "Mythic",
-			weight = math.floor(legendary.weight * 1.1),
-			unlockCost = legendary.unlockCost * 2,
+			id = family .. "_uncommon",
+			name = EXTRA_NAMES.Uncommon[family],
+			category = common.category,
+			tier = "Uncommon",
+			weight = math.floor((common.weight + rare.weight) / 2),
+			unlockCost = math.floor((common.unlockCost + rare.unlockCost) / 2),
 			stats = stats,
-			description = legendary.description,
+			description = common.description,
 		})
 	end
 end
@@ -530,6 +572,11 @@ local variantFamilies: {
 		base = "engine", prefix = "engine_diesel", label = "Diesel", weight = 1.3,
 		scale = { speed = 0.85, accel = 1.3 },
 		desc = "Heavy torque, lower top end.",
+	},
+	{
+		base = "engine", prefix = "engine_rotary", label = "Rotary", weight = 0.8,
+		scale = { speed = 1.05, accel = 1.2 },
+		desc = "Light, revvy and thirsty for punch.",
 	},
 	{
 		base = "wheels", prefix = "wheels_mud", label = "Mud", weight = 1.2,
@@ -614,6 +661,20 @@ local utilityFamilies = {
 		desc = "Pulls pickups in from further away.",
 		stats = function(tier: string): { [string]: number }
 			return { pickupMult = 1.4 + 0.4 * TIER_INDEX[tier] }
+		end,
+	},
+	{
+		prefix = "utility_shield", name = "Shield Generator", weight = 10,
+		desc = "A rechargeable shield that soaks damage before the hull does.",
+		stats = function(tier: string): { [string]: number }
+			return { shieldMax = scaled(25, tier), shieldRegen = 2 + TIER_INDEX[tier] }
+		end,
+	},
+	{
+		prefix = "utility_siphon", name = "Fuel Siphon", weight = 9,
+		desc = "Every kill drains a little fuel back into the tank.",
+		stats = function(tier: string): { [string]: number }
+			return { fuelPerKill = 1 + 0.8 * TIER_INDEX[tier] }
 		end,
 	},
 	{
@@ -728,6 +789,15 @@ local weaponFamilies = {
 		end,
 	},
 	{
+		prefix = "weapon_mine",
+		name = "Mine Layer",
+		weight = 15,
+		desc = "Drops mines behind you. Best against a chasing swarm.",
+		stats = function(tier: string): { [string]: number }
+			return { ramDamage = 4, gunDamage = scaled(26, tier), fireRate = 1.4 }
+		end,
+	},
+	{
 		prefix = "weapon_ram",
 		name = "Ram",
 		weight = 10,
@@ -792,6 +862,9 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 	boostMult: number,
 	pickupMult: number,
 	scrapMult: number,
+	shieldMax: number,
+	shieldRegen: number,
+	fuelPerKill: number,
 	weaponKind: string,
 	overweight: boolean,
 }
@@ -813,6 +886,9 @@ function PartsCatalog.ComputeLoadoutStats(loadout: { [string]: string }): {
 		boostMult = 1,
 		pickupMult = 1,
 		scrapMult = 1,
+		shieldMax = 0,
+		shieldRegen = 0,
+		fuelPerKill = 0,
 		weaponKind = "",
 		overweight = false,
 	}
@@ -949,6 +1025,7 @@ local SHAPES: { [string]: { size: Vector3, kind: string } } = {
 	weapon_ram = { size = Vector3.new(6, 2, 2), kind = "ram" },
 	weapon_shotgun = { size = Vector3.new(2, 2, 4), kind = "shotgun" },
 	weapon_rocket = { size = Vector3.new(4, 2, 4), kind = "rocket" },
+	weapon_mine = { size = Vector3.new(4, 2, 2), kind = "mine" },
 }
 
 local SHAPE_PREFIXES = {
@@ -959,6 +1036,7 @@ local SHAPE_PREFIXES = {
 	"weapon_ram",
 	"weapon_shotgun",
 	"weapon_rocket",
+	"weapon_mine",
 	"long",
 	"brick",
 	"plate",
@@ -1034,7 +1112,7 @@ function PartsCatalog.BlockSupported(block: PlacedBlock, others: { PlacedBlock }
 end
 
 function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
-	local rank = { Scrap = 0, Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+	local rank = { Scrap = 0, Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Relic = 7 }
 	-- Same tier: prefer the part with the bigger stats, so which variant counts
 	-- does not depend on table iteration order.
 	local function power(part: PartDef): number
