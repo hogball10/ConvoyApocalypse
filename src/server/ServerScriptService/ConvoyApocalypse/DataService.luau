@@ -48,6 +48,8 @@ DataService._store = nil :: DataStore?
 -- Gamepasses a player owns, by Constants.GAMEPASSES id. Roblox is the record of
 -- what was bought, so this is never saved; GamepassService fills it on join.
 DataService._passes = {} :: { [number]: { [string]: boolean } }
+-- Players whose saved data could not be read; they play on a blank profile that is never written back.
+DataService._unsaved = {} :: { [number]: boolean }
 
 local function deepCopy<T>(value: T): T
 	if typeof(value) ~= "table" then
@@ -116,6 +118,10 @@ local function defaultProfile(): PlayerProfile
 	}
 end
 
+local LOAD_ATTEMPTS = 5
+local SAVE_ATTEMPTS = 4
+local AUTOSAVE_INTERVAL = 60
+
 local function keyFor(userId: number): string
 	return "player_" .. tostring(userId)
 end
@@ -138,10 +144,29 @@ function DataService.Init()
 	Players.PlayerRemoving:Connect(function(player)
 		DataService.Save(player)
 		DataService._profiles[player.UserId] = nil
+		DataService._unsaved[player.UserId] = nil
 	end)
 	game:BindToClose(function()
+		-- Save everyone at once; the server is only given about 30s to shut down.
+		local pending = 0
 		for _, player in Players:GetPlayers() do
-			DataService.Save(player)
+			pending += 1
+			task.spawn(function()
+				DataService.Save(player)
+				pending -= 1
+			end)
+		end
+		while pending > 0 do
+			task.wait()
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(AUTOSAVE_INTERVAL)
+			for _, player in Players:GetPlayers() do
+				task.spawn(DataService.Save, player)
+			end
 		end
 	end)
 
@@ -183,9 +208,25 @@ end
 function DataService.Load(player: Player)
 	local profile = defaultProfile()
 	if DataService._store then
-		local ok, data = pcall(function()
-			return DataService._store:GetAsync(keyFor(player.UserId))
-		end)
+		local ok, data
+		for attempt = 1, LOAD_ATTEMPTS do
+			ok, data = pcall(function()
+				return DataService._store:GetAsync(keyFor(player.UserId))
+			end)
+			if ok or player.Parent == nil then
+				break
+			end
+			warn(string.format("[DataService] Load attempt %d/%d failed for %s: %s", attempt, LOAD_ATTEMPTS, player.Name, tostring(data)))
+			task.wait(attempt * 1.5)
+		end
+		if player.Parent == nil then
+			return
+		end
+		if not ok then
+			-- Never save over real progress we could not read.
+			DataService._unsaved[player.UserId] = true
+			warn("[DataService] Could not load data for", player.Name, "- progress this session will NOT be saved:", data)
+		end
 		if ok and typeof(data) == "table" then
 			-- Merge saved fields onto defaults for forward compatibility
 			for k, v in data do
@@ -205,8 +246,6 @@ function DataService.Load(player: Player)
 					slot.loadout = PartsCatalog.DefaultLoadout()
 				end
 			end
-		elseif not ok then
-			warn("[DataService] Load failed for", player.Name, data)
 		end
 	end
 
@@ -220,11 +259,18 @@ function DataService.Save(player: Player)
 	if not profile or not DataService._store then
 		return
 	end
-	local ok, err = pcall(function()
-		DataService._store:SetAsync(keyFor(player.UserId), profile)
-	end)
-	if not ok then
-		warn("[DataService] Save failed for", player.Name, err)
+	if DataService._unsaved[player.UserId] then
+		return
+	end
+	for attempt = 1, SAVE_ATTEMPTS do
+		local ok, err = pcall(function()
+			DataService._store:SetAsync(keyFor(player.UserId), profile)
+		end)
+		if ok then
+			return
+		end
+		warn(string.format("[DataService] Save attempt %d/%d failed for %s: %s", attempt, SAVE_ATTEMPTS, player.Name, tostring(err)))
+		task.wait(attempt)
 	end
 end
 
