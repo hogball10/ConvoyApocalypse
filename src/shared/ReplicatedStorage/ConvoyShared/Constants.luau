@@ -41,7 +41,6 @@ Constants.ZOMBIE_BASE_DAMAGE = 8
 Constants.ZOMBIE_BASE_SPEED = 14
 Constants.RAM_DAMAGE = 40
 Constants.RAM_SELF_DAMAGE = 5
-Constants.OVERWHELM_GRACE = 4 -- seconds without fuel before overwhelm ends run
 
 -- Progression
 Constants.XP_PER_METERS = 10 -- 1 xp per this many meters
@@ -78,50 +77,6 @@ Constants.LEVER_TIER_MULT = {
 Constants.STARTING_SLOTS = 1
 Constants.MAX_SLOTS = 4
 Constants.SLOT_UNLOCK_COSTS = { 0, 200, 500, 1000 }
-
--- Boost shop. A boost lasts a number of runs; `effects` multiply together when
--- several are active. Keys: scrapMult, xpMult, fuelMult, healthMult, pickupMult.
-export type ShopItem = {
-	id: string,
-	name: string,
-	desc: string,
-	price: number,
-	runs: number,
-	effects: { [string]: number },
-}
-
-Constants.SHOP_MAX_RUNS = 9
-Constants.SHOP_ITEMS = {
-	{
-		id = "scrap2x", name = "Double Scrap", desc = "2x scrap from every run",
-		price = 400, runs = 3, effects = { scrapMult = 2 },
-	},
-	{
-		id = "xp2x", name = "Double XP", desc = "2x XP from every run",
-		price = 300, runs = 3, effects = { xpMult = 2 },
-	},
-	{
-		id = "bigTank", name = "Extended Tank", desc = "+40% fuel capacity",
-		price = 250, runs = 3, effects = { fuelMult = 1.4 },
-	},
-	{
-		id = "hardHull", name = "Hardened Hull", desc = "+30% vehicle health",
-		price = 250, runs = 3, effects = { healthMult = 1.3 },
-	},
-	{
-		id = "magnet", name = "Pickup Magnet", desc = "Grab pickups from twice as far",
-		price = 200, runs = 3, effects = { pickupMult = 2 },
-	},
-} :: { ShopItem }
-
-function Constants.ShopItem(id: string): ShopItem?
-	for _, item in Constants.SHOP_ITEMS do
-		if item.id == id then
-			return item
-		end
-	end
-	return nil
-end
 
 -- Gamepasses: permanent perks bought with Robux. `effects` use the same keys as
 -- the boost shop and multiply with it, so a 2x pass plus a 2x boost is 4x.

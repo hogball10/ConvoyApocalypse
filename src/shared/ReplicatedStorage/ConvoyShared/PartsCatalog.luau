@@ -1195,9 +1195,16 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 	local mounts: { WeaponMount } = {}
 	local weaponWeight = 0
 	local strongestRam = 0
+	-- Like guns, every fuel tank on the car holds fuel and weighs, not just the best.
+	local fuelTotal = 0
+	local tankWeight = 0
 	for blockIndex, block in blocks do
 		local part = PartsCatalog.Get(block.partId)
 		if part then
+			if part.category == "FuelTank" then
+				fuelTotal += part.stats.fuel or 0
+				tankWeight += part.weight
+			end
 			if part.category == "Weapon" then
 				-- Every weapon on the car fires and weighs, not just the best one.
 				weaponWeight += part.weight
@@ -1249,6 +1256,11 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 	end
 	-- The best weapon's weight is already in the loadout; add the rest.
 	extraWeight += weaponWeight - (if best.Weapon then best.Weapon.weight else 0)
+	-- The best tank's fuel and weight are already in the loadout; add the rest.
+	if best.FuelTank then
+		stats.fuel += fuelTotal - (best.FuelTank.stats.fuel or 0)
+		extraWeight += tankWeight - best.FuelTank.weight
+	end
 	-- Too many guns would cost the server more than they are worth.
 	table.sort(mounts, function(a, b)
 		return a.damage * a.fireRate > b.damage * b.fireRate

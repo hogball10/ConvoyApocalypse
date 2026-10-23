@@ -130,6 +130,34 @@ function RunHUD.Build()
 		Parent = convoy,
 	})
 
+	-- Ends your run early; tap twice so a stray click does not throw one away.
+	local endRun = UIUtil.Button({
+		Name = "EndRunButton",
+		Text = "END RUN",
+		Size = UDim2.new(0, 240, 0, 40),
+		Position = UDim2.new(1, -20, 0, 186),
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundColor3 = Color3.fromRGB(150, 45, 45),
+		Parent = gui,
+	})
+	local armed = false
+	endRun.MouseButton1Click:Connect(function()
+		if armed then
+			armed = false
+			endRun.Text = "ENDING..."
+			Remotes.Event("LeaveRun"):FireServer()
+			return
+		end
+		armed = true
+		endRun.Text = "TAP AGAIN TO END"
+		task.delay(3, function()
+			if armed then
+				armed = false
+				endRun.Text = "END RUN"
+			end
+		end)
+	end)
+
 	local endPanel = UIUtil.Frame({
 		Name = "EndPanel",
 		Size = UDim2.new(0, 420, 0, 310),
@@ -178,6 +206,16 @@ function RunHUD.Update(state: any)
 	local gui = RunHUD._gui
 	if not gui then
 		return
+	end
+
+	local endRunButton = gui:FindFirstChild("EndRunButton") :: TextButton?
+	if endRunButton then
+		local running = not (state.ended or state.active == false)
+		endRunButton.Visible = running
+		if running and endRunButton.Text == "ENDING..." then
+			-- The server has not ended the run (others are still driving).
+			endRunButton.Text = "END RUN"
+		end
 	end
 
 	if state.ended or state.active == false then

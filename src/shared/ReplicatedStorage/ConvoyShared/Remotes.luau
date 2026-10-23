@@ -20,7 +20,6 @@ local EVENT_NAMES = {
 	"RunState",
 	"VehicleInput",
 	"ReturnToGarage",
-	"BuyBoost",
 	"BuyGamepass",
 	"FireWeapon",
 	"TradeRequest",

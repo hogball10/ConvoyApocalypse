@@ -25,7 +25,8 @@ export type Participant = {
 	vehicle: Model,
 	kills: number,
 	alive: boolean,
-	overwhelmTimer: number,
+	outOfFuel: boolean,
+	killScrap: number, -- scrap already paid out for kills this run
 	pickups: number,
 	bossKills: number,
 	-- Latest steering sent by the player's client, and when it arrived.
@@ -642,6 +643,11 @@ end
 local function creditKill(session: RunSession, participant: Participant, zombie: Model)
 	participant.kills += 1
 	participant.vehicle:SetAttribute("Kills", participant.kills)
+	-- Every kill pays out straight away, so the scrap counter climbs as you play.
+	local scrapMult = (participant.vehicle:GetAttribute("ScrapMult") :: number?) or 1
+	local gain = math.floor(Constants.SCRAP_PER_KILL * scrapMult)
+	participant.killScrap += gain
+	DataService.AddScrap(participant.player, gain)
 	local siphon = (participant.vehicle:GetAttribute("FuelPerKill") :: number?) or 0
 	if siphon > 0 then
 		local maxFuel = participant.vehicle:GetAttribute("MaxFuel") :: number
@@ -1122,7 +1128,7 @@ function ConvoyRunService.BindVehicle(session: RunSession, participant: Particip
 	end)
 end
 
--- Shop boosts become vehicle stats for this run; they are used up in EndRun.
+-- Gamepass perks become vehicle stats for this run.
 local function applyBoosts(player: Player, vehicle: Model)
 	local fuelMult = DataService.BoostEffect(player, "fuelMult")
 	if fuelMult ~= 1 then
@@ -1143,7 +1149,7 @@ local function applyBoosts(player: Player, vehicle: Model)
 
 	local active = DataService.ActiveBoostNames(player)
 	if #active > 0 then
-		notify(player, "Boosts active: " .. table.concat(active, ", "))
+		notify(player, "Perks active: " .. table.concat(active, ", "))
 	end
 end
 
@@ -1228,7 +1234,8 @@ function ConvoyRunService.Start(host: Player)
 		vehicle = vehicle,
 		kills = 0,
 		alive = true,
-		overwhelmTimer = 0,
+		outOfFuel = false,
+		killScrap = 0,
 		pickups = 0,
 		bossKills = 0,
 		throttle = 0,
@@ -1289,7 +1296,8 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 		vehicle = vehicle,
 		kills = 0,
 		alive = true,
-		overwhelmTimer = 0,
+		outOfFuel = false,
+		killScrap = 0,
 		pickups = 0,
 		bossKills = 0,
 		throttle = 0,
@@ -1417,16 +1425,13 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 			leadDistance = zDist
 		end
 
-		-- Out of fuel overwhelm
-		if fuel <= 0 then
-			participant.overwhelmTimer += dt
-			if participant.overwhelmTimer >= Constants.OVERWHELM_GRACE then
-				participant.alive = false
-				vehicle:SetAttribute("Alive", false)
-				notify(participant.player, "Out of fuel — overwhelmed!")
-			end
-		else
-			participant.overwhelmTimer = 0
+		-- An empty tank only stops the car. The run goes on, guns still firing,
+		-- until zombies destroy it.
+		if fuel <= 0 and not participant.outOfFuel then
+			participant.outOfFuel = true
+			notify(participant.player, "Out of fuel — hold them off!")
+		elseif fuel > 0 then
+			participant.outOfFuel = false
 		end
 
 		-- Every mounted weapon fires on its own timer; each kind fires
@@ -1572,11 +1577,10 @@ function ConvoyRunService.EndRun(session: RunSession)
 	local distanceScrap = math.floor(distance / Constants.SCRAP_PER_METERS)
 
 	for _, participant in session.participants do
-		local killScrap = participant.kills * Constants.SCRAP_PER_KILL
+		local killScrap = participant.killScrap
 		local bossScrap = participant.bossKills * Constants.BOSS_SCRAP
 		local scrapMult = (participant.vehicle:GetAttribute("ScrapMult") :: number?) or 1
 		local distanceScrap = math.floor(distanceScrap * scrapMult)
-		killScrap = math.floor(killScrap * scrapMult)
 		bossScrap = math.floor(bossScrap * scrapMult)
 		local total = distanceScrap + killScrap + bossScrap
 		local xp = math.floor(distance / Constants.XP_PER_METERS)
@@ -1586,10 +1590,10 @@ function ConvoyRunService.EndRun(session: RunSession)
 		local boostNames = DataService.ActiveBoostNames(participant.player)
 		local previous = DataService.Get(participant.player)
 		local isRecord = previous ~= nil and distance > previous.highScore
-		DataService.AddScrap(participant.player, total)
+		-- Kill scrap was paid as each zombie fell.
+		DataService.AddScrap(participant.player, total - killScrap)
 		DataService.UpdateHighScore(participant.player, distance)
 		local level, levelsGained = DataService.AddRunProgress(participant.player, xp, participant.kills)
-		DataService.ConsumeBoosts(participant.player)
 		DataService.Save(participant.player)
 		notify(
 			participant.player,

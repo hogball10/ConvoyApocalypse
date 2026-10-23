@@ -96,7 +96,7 @@ local function build()
 	})
 	UIUtil.Text({
 		Name = "Hint",
-		Text = "Permanent perks. They stack with boosts and your parts.",
+		Text = "Permanent perks. They stack with your parts.",
 		Size = UDim2.new(1, -28, 0, 18),
 		Position = UDim2.fromOffset(14, 44),
 		TextColor3 = UIUtil.Colors.Muted,
