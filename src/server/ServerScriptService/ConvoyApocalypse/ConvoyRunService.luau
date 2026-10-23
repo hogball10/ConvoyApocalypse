@@ -106,9 +106,6 @@ ConvoyRunService._runs = {} :: { [string]: RunSession }
 ConvoyRunService._playerRun = {} :: { [number]: string }
 -- Set by GarageService: puts a player back in their garage after a run.
 ConvoyRunService.ReturnHandler = nil :: ((Player, boolean?) -> ())?
--- Player -> host of the run they just finished. Everyone who ran together is
--- sent back to that host's garage, the one with the spawn, not to separate ones.
-ConvoyRunService.ReturnTarget = {} :: { [number]: number }
 
 local function notify(player: Player, message: string)
 	Remotes.Event("Notification"):FireClient(player, message)
@@ -1472,7 +1469,6 @@ function ConvoyRunService.EndRun(session: RunSession)
 			vehicles = {},
 		})
 		ConvoyRunService._playerRun[participant.player.UserId] = nil
-		ConvoyRunService.ReturnTarget[participant.player.UserId] = session.hostUserId
 	end
 
 	-- Nobody should be left standing in the wasteland: return everyone to their
