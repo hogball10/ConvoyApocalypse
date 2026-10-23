@@ -543,9 +543,12 @@ function GarageService.ReturnToGarage(player: Player, silent: boolean?)
 		end
 		return
 	end
-	local hostId = GarageService._playerGarage[player.UserId]
-	if not hostId or not GarageService._garages[hostId] then
-		hostId = player.UserId
+	-- Everyone goes back to their own garage, even if they were visiting a friend's
+	-- or ran in someone else's convoy.
+	local hostId = player.UserId
+	local previous = GarageService._playerGarage[player.UserId]
+	if previous and previous ~= hostId and GarageService._garages[previous] then
+		GarageService._garages[previous].occupants[player.UserId] = nil
 	end
 	if not GarageService._garages[hostId] then
 		GarageService.OpenFor(player)

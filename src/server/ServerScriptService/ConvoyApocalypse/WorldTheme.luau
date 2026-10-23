@@ -4,6 +4,7 @@
 ]]
 
 local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
 
 local WorldTheme = {}
 
@@ -39,8 +40,8 @@ function WorldTheme.Apply()
 
 	local atmosphere = Instance.new("Atmosphere")
 	atmosphere.Name = "Atmosphere"
-	atmosphere.Density = 0.22
-	atmosphere.Offset = 0.15
+	atmosphere.Density = 0.3
+	atmosphere.Offset = 0.3
 	atmosphere.Color = Color3.fromRGB(190, 190, 200)
 	atmosphere.Decay = Color3.fromRGB(150, 130, 110)
 	atmosphere.Glare = 0.1
@@ -66,7 +67,7 @@ function WorldTheme.Apply()
 	cc.Name = "ColorCorrection"
 	cc.Brightness = 0.02
 	cc.Contrast = 0.18
-	cc.Saturation = 0.05
+	cc.Saturation = 0.1
 	cc.TintColor = Color3.fromRGB(255, 248, 238)
 	cc.Parent = Lighting
 
@@ -78,20 +79,26 @@ function WorldTheme.Apply()
 
 end
 
--- Biomes differ by fog only; the time of day stays put.
+-- Biomes differ by fog, haze and colour grade only; the time of day stays put.
+-- The change eases in so crossing a biome border is not a sudden pop.
+local BIOME_LOOK = {
+	RuinedCity = { fog = Color3.fromRGB(150, 155, 165), fogEnd = 520, tint = Color3.fromRGB(235, 240, 250), haze = Color3.fromRGB(165, 172, 185), saturation = -0.05 },
+	Desert = { fog = Color3.fromRGB(225, 195, 140), fogEnd = 700, tint = Color3.fromRGB(255, 238, 205), haze = Color3.fromRGB(235, 200, 150), saturation = 0.15 },
+	SnowyMountains = { fog = Color3.fromRGB(200, 215, 230), fogEnd = 580, tint = Color3.fromRGB(235, 245, 255), haze = Color3.fromRGB(205, 220, 238), saturation = 0.05 },
+	WastelandHighways = { fog = Color3.fromRGB(190, 175, 150), fogEnd = 650, tint = Color3.fromRGB(255, 244, 228), haze = Color3.fromRGB(195, 185, 175), saturation = 0.1 },
+}
+
 function WorldTheme.SetBiome(biome: string)
-	if biome == "RuinedCity" then
-		Lighting.FogColor = Color3.fromRGB(150, 155, 165)
-		Lighting.FogEnd = 520
-	elseif biome == "Desert" then
-		Lighting.FogColor = Color3.fromRGB(225, 195, 140)
-		Lighting.FogEnd = 700
-	elseif biome == "SnowyMountains" then
-		Lighting.FogColor = Color3.fromRGB(200, 215, 230)
-		Lighting.FogEnd = 580
-	else -- WastelandHighways
-		Lighting.FogColor = Color3.fromRGB(190, 175, 150)
-		Lighting.FogEnd = 650
+	local look = BIOME_LOOK[biome] or BIOME_LOOK.WastelandHighways
+	local info = TweenInfo.new(3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+	TweenService:Create(Lighting, info, { FogColor = look.fog, FogEnd = look.fogEnd }):Play()
+	local cc = Lighting:FindFirstChild("ColorCorrection")
+	if cc then
+		TweenService:Create(cc, info, { TintColor = look.tint, Saturation = look.saturation }):Play()
+	end
+	local atmosphere = Lighting:FindFirstChild("Atmosphere")
+	if atmosphere then
+		TweenService:Create(atmosphere, info, { Color = look.haze }):Play()
 	end
 end
 

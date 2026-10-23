@@ -203,6 +203,81 @@ local function ensureWorld(): Folder
 	return world :: Folder
 end
 
+-- Hills, mesas and ground patches beyond the shoulders so the horizon is not a flat plain.
+-- Everything sits inside the 240-wide far ground, clear of the road and its props.
+local SCENERY = {
+	WastelandHighways = { rock = Color3.fromRGB(112, 96, 78), patch = Color3.fromRGB(96, 104, 66), mat = Enum.Material.Slate },
+	RuinedCity = { rock = Color3.fromRGB(88, 92, 100), patch = Color3.fromRGB(70, 72, 76), mat = Enum.Material.Concrete },
+	Desert = { rock = Color3.fromRGB(196, 130, 82), patch = Color3.fromRGB(226, 190, 128), mat = Enum.Material.Sandstone },
+	SnowyMountains = { rock = Color3.fromRGB(120, 128, 140), patch = Color3.fromRGB(232, 238, 244), mat = Enum.Material.Rock },
+}
+
+local function buildScenery(seg: Model, z: number, biome: string)
+	local look = SCENERY[biome] or SCENERY.WastelandHighways
+	local rng = Random.new(z * 7 + #biome)
+
+	-- Flat colour patches break up the ground texture (dry grass, sand drifts, snow, rubble).
+	for _ = 1, 5 do
+		local patch = Instance.new("Part")
+		patch.Name = "GroundPatch"
+		patch.Anchored = true
+		patch.CanCollide = false
+		patch.CanQuery = false
+		patch.Material = if biome == "SnowyMountains" then Enum.Material.Snow elseif biome == "Desert" then Enum.Material.Sand else Enum.Material.Grass
+		patch.Color = look.patch:Lerp(Color3.new(1, 1, 1), rng:NextNumber(0, 0.15))
+		local side = if rng:NextNumber() > 0.5 then 1 else -1
+		patch.Size = Vector3.new(rng:NextNumber(14, 34), 0.1, rng:NextNumber(14, 34))
+		patch.CFrame = CFrame.new(side * rng:NextNumber(32, 100), -0.5, -z + rng:NextNumber(-28, 28)) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0)
+		patch.Parent = seg
+	end
+
+	-- Big landforms well back from the road.
+	for _ = 1, 3 do
+		local side = if rng:NextNumber() > 0.5 then 1 else -1
+		local x = side * rng:NextNumber(70, 112)
+		local pz = -z + rng:NextNumber(-26, 26)
+		local height = rng:NextNumber(14, 34)
+		local width = rng:NextNumber(22, 44)
+		local form = Instance.new("Part")
+		form.Name = "Landform"
+		form.Anchored = true
+		form.CanCollide = false
+		form.CanQuery = false
+		form.Material = look.mat
+		form.Color = look.rock:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0, 0.18))
+		if biome == "Desert" then
+			-- Flat-topped mesa
+			form.Shape = Enum.PartType.Cylinder
+			form.Size = Vector3.new(height, width, width * rng:NextNumber(0.7, 1))
+			form.CFrame = CFrame.new(x, height / 2 - 1, pz) * CFrame.Angles(0, rng:NextNumber(0, math.pi), math.pi / 2)
+		elseif biome == "RuinedCity" then
+			-- Collapsed tower block
+			form.Shape = Enum.PartType.Block
+			form.Size = Vector3.new(width * 0.5, height * 1.4, width * 0.5)
+			form.CFrame = CFrame.new(x, height * 0.7 - 1, pz) * CFrame.Angles(rng:NextNumber(-0.08, 0.08), rng:NextNumber(0, math.pi), rng:NextNumber(-0.08, 0.08))
+		else
+			-- Rounded hill with the lower half buried
+			form.Shape = Enum.PartType.Ball
+			form.Size = Vector3.new(width, height * 2, width * rng:NextNumber(0.8, 1.2))
+			form.CFrame = CFrame.new(x, -1, pz)
+			if biome == "SnowyMountains" then
+				local cap = Instance.new("Part")
+				cap.Name = "SnowCap"
+				cap.Shape = Enum.PartType.Ball
+				cap.Anchored = true
+				cap.CanCollide = false
+				cap.CanQuery = false
+				cap.Material = Enum.Material.Snow
+				cap.Color = Color3.fromRGB(240, 245, 250)
+				cap.Size = Vector3.new(width * 0.7, height * 0.9, width * 0.7)
+				cap.CFrame = CFrame.new(x, height * 0.72, pz)
+				cap.Parent = seg
+			end
+		end
+		form.Parent = seg
+	end
+end
+
 -- Built around X = 0, then slid over to the run's lane once it is complete, so
 -- the segment never shows up half-built or in the wrong place.
 local function buildRoadSegment(parent: Folder, z: number, biome: string, originX: number)
@@ -235,6 +310,21 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		dash.CFrame = CFrame.new(0, 0.56, -z + i * 12)
 		dash.Parent = seg
 	end
+
+	-- Solid edge lines
+	for _, x in { -16.2, 16.2 } do
+		local edge = Instance.new("Part")
+		edge.Name = "EdgeLine"
+		edge.Size = Vector3.new(0.5, 0.12, 60)
+		edge.Anchored = true
+		edge.CanCollide = false
+		edge.Material = Enum.Material.SmoothPlastic
+		edge.Color = Color3.fromRGB(215, 212, 200)
+		edge.CFrame = CFrame.new(x, 0.56, -z)
+		edge.Parent = seg
+	end
+
+	buildScenery(seg, z, biome)
 
 	-- Shoulders / terrain
 	for _, x in { -24, 24 } do
@@ -277,7 +367,7 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		SnowyMountains = { "Pine", "Rock", "DeadTree", "Barricade" },
 	}
 	local choices = roadside[biome] or { "Wreck", "Bush" }
-	for _ = 1, 4 do
+	for _ = 1, 7 do
 		local side = if rng:NextNumber() > 0.5 then 1 else -1
 		local px = side * rng:NextNumber(20, 38)
 		local pz = -z + rng:NextNumber(-25, 25)
