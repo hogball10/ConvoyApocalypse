@@ -12,12 +12,12 @@ local WorldTheme = {}
 -- player sees the same bright sky wherever they are in a run.
 local DAYLIGHT_CLOCK = 13
 
-local DAY_AMBIENT = Color3.fromRGB(120, 118, 112)
+local DAY_AMBIENT = Color3.fromRGB(150, 155, 165)
 
 function WorldTheme.Apply()
-	Lighting.Brightness = 2.4
+	Lighting.Brightness = 3
 	Lighting.Ambient = DAY_AMBIENT
-	Lighting.OutdoorAmbient = Color3.fromRGB(140, 135, 125)
+	Lighting.OutdoorAmbient = Color3.fromRGB(165, 170, 180)
 	Lighting.ColorShift_Top = Color3.fromRGB(255, 235, 200)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(60, 55, 50)
 	Lighting.EnvironmentDiffuseScale = 0.55
@@ -27,9 +27,9 @@ function WorldTheme.Apply()
 	Lighting.ClockTime = DAYLIGHT_CLOCK
 	Lighting.GeographicLatitude = 25
 	Lighting.ExposureCompensation = 0.15
-	Lighting.FogColor = Color3.fromRGB(190, 175, 150)
-	Lighting.FogStart = 120
-	Lighting.FogEnd = 650
+	Lighting.FogColor = Color3.fromRGB(196, 226, 248)
+	Lighting.FogStart = 140
+	Lighting.FogEnd = 460
 
 	for _, name in { "Atmosphere", "Sky", "Bloom", "ColorCorrection", "SunRays", "DepthOfField" } do
 		local old = Lighting:FindFirstChild(name)
@@ -40,12 +40,12 @@ function WorldTheme.Apply()
 
 	local atmosphere = Instance.new("Atmosphere")
 	atmosphere.Name = "Atmosphere"
-	atmosphere.Density = 0.3
+	atmosphere.Density = 0.22
 	atmosphere.Offset = 0.3
-	atmosphere.Color = Color3.fromRGB(190, 190, 200)
-	atmosphere.Decay = Color3.fromRGB(150, 130, 110)
+	atmosphere.Color = Color3.fromRGB(180, 215, 245)
+	atmosphere.Decay = Color3.fromRGB(110, 165, 235) -- the horizon haze; a warm tint made distant grass look like sand
 	atmosphere.Glare = 0.1
-	atmosphere.Haze = 0.9
+	atmosphere.Haze = 0.5
 	atmosphere.Parent = Lighting
 
 	local sky = Instance.new("Sky")
@@ -58,7 +58,7 @@ function WorldTheme.Apply()
 
 	local bloom = Instance.new("BloomEffect")
 	bloom.Name = "Bloom"
-	bloom.Intensity = 0.45
+	bloom.Intensity = 0.25
 	bloom.Size = 28
 	bloom.Threshold = 1.1
 	bloom.Parent = Lighting
@@ -67,7 +67,7 @@ function WorldTheme.Apply()
 	cc.Name = "ColorCorrection"
 	cc.Brightness = 0.02
 	cc.Contrast = 0.18
-	cc.Saturation = 0.1
+	cc.Saturation = 0.25
 	cc.TintColor = Color3.fromRGB(255, 248, 238)
 	cc.Parent = Lighting
 
@@ -79,13 +79,15 @@ function WorldTheme.Apply()
 
 end
 
+-- The fog closes in before the road ends (about 390 studs ahead), so the plain
+-- beyond it is never seen.
 -- Biomes differ by fog, haze and colour grade only; the time of day stays put.
 -- The change eases in so crossing a biome border is not a sudden pop.
 local BIOME_LOOK = {
-	RuinedCity = { fog = Color3.fromRGB(150, 155, 165), fogEnd = 520, tint = Color3.fromRGB(235, 240, 250), haze = Color3.fromRGB(165, 172, 185), saturation = -0.05 },
-	Desert = { fog = Color3.fromRGB(225, 195, 140), fogEnd = 700, tint = Color3.fromRGB(255, 238, 205), haze = Color3.fromRGB(235, 200, 150), saturation = 0.15 },
-	SnowyMountains = { fog = Color3.fromRGB(200, 215, 230), fogEnd = 580, tint = Color3.fromRGB(235, 245, 255), haze = Color3.fromRGB(205, 220, 238), saturation = 0.05 },
-	WastelandHighways = { fog = Color3.fromRGB(190, 175, 150), fogEnd = 650, tint = Color3.fromRGB(255, 244, 228), haze = Color3.fromRGB(195, 185, 175), saturation = 0.1 },
+	RuinedCity = { fog = Color3.fromRGB(200, 222, 242), fogEnd = 430, tint = Color3.fromRGB(250, 250, 255), haze = Color3.fromRGB(190, 215, 240), saturation = 0.2 },
+	Desert = { fog = Color3.fromRGB(252, 226, 176), fogEnd = 460, tint = Color3.fromRGB(255, 245, 220), haze = Color3.fromRGB(250, 215, 160), saturation = 0.25 },
+	SnowyMountains = { fog = Color3.fromRGB(205, 225, 248), fogEnd = 440, tint = Color3.fromRGB(240, 248, 255), haze = Color3.fromRGB(200, 222, 248), saturation = 0.15 },
+	WastelandHighways = { fog = Color3.fromRGB(196, 226, 248), fogEnd = 460, tint = Color3.fromRGB(255, 250, 238), haze = Color3.fromRGB(180, 215, 245), saturation = 0.25 },
 }
 
 function WorldTheme.SetBiome(biome: string)

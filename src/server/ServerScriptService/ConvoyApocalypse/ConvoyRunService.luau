@@ -59,9 +59,9 @@ export type RunSession = {
 	originX: number,
 }
 
--- Lanes are this far apart. The road's far ground is 240 wide, so there is room
--- to spare between neighbours.
-local LANE_SPACING = 400
+-- Lanes are this far apart. The road's far ground is 1000 wide so the world runs
+-- to the horizon, and neighbouring lanes' ground must not overlap.
+local LANE_SPACING = 1100
 local lanesTaken: { [number]: boolean } = {}
 
 -- Rebuilding the road and re-pushing Lighting every Heartbeat is wasted work;
@@ -182,11 +182,11 @@ end
 
 local function biomeColor(name: string): Color3
 	if name == "WastelandHighways" then
-		return Color3.fromRGB(110, 95, 70)
+		return Color3.fromRGB(104, 184, 74)
 	elseif name == "RuinedCity" then
-		return Color3.fromRGB(75, 78, 85)
+		return Color3.fromRGB(118, 176, 98)
 	elseif name == "Desert" then
-		return Color3.fromRGB(210, 175, 115)
+		return Color3.fromRGB(236, 200, 124)
 	elseif name == "SnowyMountains" then
 		return Color3.fromRGB(210, 220, 230)
 	end
@@ -194,6 +194,19 @@ local function biomeColor(name: string): Color3
 end
 
 local function ensureWorld(): Folder
+	-- The road only extends a few hundred studs ahead; past that the place's
+	-- Baseplate is what the horizon shows, so make it meadow, not bare sand.
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate and baseplate:IsA("BasePart") then
+		baseplate.Material = Enum.Material.Grass
+		baseplate.Color = Color3.fromRGB(104, 184, 74)
+		-- Its sandy "Surface" texture would paint over the green.
+		for _, child in baseplate:GetChildren() do
+			if child:IsA("Texture") then
+				child.Transparency = 1
+			end
+		end
+	end
 	local world = Workspace:FindFirstChild("ConvoyWorld")
 	if not world then
 		world = Instance.new("Folder")
@@ -204,10 +217,10 @@ local function ensureWorld(): Folder
 end
 
 -- Hills, mesas and ground patches beyond the shoulders so the horizon is not a flat plain.
--- Everything sits inside the 240-wide far ground, clear of the road and its props.
+-- Everything sits on the far ground, clear of the road and its props.
 local SCENERY = {
-	WastelandHighways = { rock = Color3.fromRGB(112, 96, 78), patch = Color3.fromRGB(96, 104, 66), mat = Enum.Material.Slate },
-	RuinedCity = { rock = Color3.fromRGB(88, 92, 100), patch = Color3.fromRGB(70, 72, 76), mat = Enum.Material.Concrete },
+	WastelandHighways = { rock = Color3.fromRGB(112, 96, 78), patch = Color3.fromRGB(146, 214, 96), mat = Enum.Material.Slate },
+	RuinedCity = { rock = Color3.fromRGB(88, 92, 100), patch = Color3.fromRGB(140, 200, 112), mat = Enum.Material.Concrete },
 	Desert = { rock = Color3.fromRGB(196, 130, 82), patch = Color3.fromRGB(226, 190, 128), mat = Enum.Material.Sandstone },
 	SnowyMountains = { rock = Color3.fromRGB(120, 128, 140), patch = Color3.fromRGB(232, 238, 244), mat = Enum.Material.Rock },
 }
@@ -227,54 +240,71 @@ local function buildScenery(seg: Model, z: number, biome: string)
 		patch.Color = look.patch:Lerp(Color3.new(1, 1, 1), rng:NextNumber(0, 0.15))
 		local side = if rng:NextNumber() > 0.5 then 1 else -1
 		patch.Size = Vector3.new(rng:NextNumber(14, 34), 0.1, rng:NextNumber(14, 34))
-		patch.CFrame = CFrame.new(side * rng:NextNumber(32, 100), -0.5, -z + rng:NextNumber(-28, 28)) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0)
+		patch.CFrame = CFrame.new(side * rng:NextNumber(32, 100), 0.15, -z + rng:NextNumber(-28, 28)) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0)
 		patch.Parent = seg
 	end
 
-	-- Big landforms well back from the road.
-	for _ = 1, 3 do
-		local side = if rng:NextNumber() > 0.5 then 1 else -1
-		local x = side * rng:NextNumber(70, 112)
-		local pz = -z + rng:NextNumber(-26, 26)
-		local height = rng:NextNumber(14, 34)
-		local width = rng:NextNumber(22, 44)
-		local form = Instance.new("Part")
-		form.Name = "Landform"
-		form.Anchored = true
-		form.CanCollide = false
-		form.CanQuery = false
-		form.Material = look.mat
-		form.Color = look.rock:Lerp(Color3.new(0, 0, 0), rng:NextNumber(0, 0.18))
-		if biome == "Desert" then
-			-- Flat-topped mesa
-			form.Shape = Enum.PartType.Cylinder
-			form.Size = Vector3.new(height, width, width * rng:NextNumber(0.7, 1))
-			form.CFrame = CFrame.new(x, height / 2 - 1, pz) * CFrame.Angles(0, rng:NextNumber(0, math.pi), math.pi / 2)
-		elseif biome == "RuinedCity" then
-			-- Collapsed tower block
-			form.Shape = Enum.PartType.Block
-			form.Size = Vector3.new(width * 0.5, height * 1.4, width * 0.5)
-			form.CFrame = CFrame.new(x, height * 0.7 - 1, pz) * CFrame.Angles(rng:NextNumber(-0.08, 0.08), rng:NextNumber(0, math.pi), rng:NextNumber(-0.08, 0.08))
-		else
-			-- Rounded hill with the lower half buried
-			form.Shape = Enum.PartType.Ball
-			form.Size = Vector3.new(width, height * 2, width * rng:NextNumber(0.8, 1.2))
-			form.CFrame = CFrame.new(x, -1, pz)
-			if biome == "SnowyMountains" then
-				local cap = Instance.new("Part")
-				cap.Name = "SnowCap"
-				cap.Shape = Enum.PartType.Ball
-				cap.Anchored = true
-				cap.CanCollide = false
-				cap.CanQuery = false
-				cap.Material = Enum.Material.Snow
-				cap.Color = Color3.fromRGB(240, 245, 250)
-				cap.Size = Vector3.new(width * 0.7, height * 0.9, width * 0.7)
-				cap.CFrame = CFrame.new(x, height * 0.72, pz)
-				cap.Parent = seg
-			end
+	-- Wildflowers dotted over the grass.
+	if biome == "WastelandHighways" or biome == "RuinedCity" then
+		local petals = {
+			Color3.fromRGB(255, 220, 60),
+			Color3.fromRGB(255, 120, 170),
+			Color3.fromRGB(255, 255, 255),
+			Color3.fromRGB(255, 130, 60),
+			Color3.fromRGB(150, 120, 255),
+		}
+		for _ = 1, 24 do
+			local side = if rng:NextNumber() > 0.5 then 1 else -1
+			local fx = side * rng:NextNumber(22, 60)
+			local fz = -z + rng:NextNumber(-30, 30)
+			local stem = Instance.new("Part")
+			stem.Name = "FlowerStem"
+			stem.Anchored = true
+			stem.CanCollide = false
+			stem.CanQuery = false
+			stem.Size = Vector3.new(0.15, 1.1, 0.15)
+			stem.Color = Color3.fromRGB(70, 160, 60)
+			stem.Material = Enum.Material.Grass
+			stem.CFrame = CFrame.new(fx, 0.6, fz)
+			stem.Parent = seg
+			local bloom = Instance.new("Part")
+			bloom.Name = "FlowerBloom"
+			bloom.Shape = Enum.PartType.Ball
+			bloom.Anchored = true
+			bloom.CanCollide = false
+			bloom.CanQuery = false
+			bloom.Size = Vector3.new(0.8, 0.8, 0.8)
+			bloom.Material = Enum.Material.SmoothPlastic
+			bloom.Color = petals[rng:NextInteger(1, #petals)]
+			bloom.CFrame = CFrame.new(fx, 1.25, fz)
+			bloom.Parent = seg
 		end
-		form.Parent = seg
+	end
+
+	-- Blender-modelled landforms well back from the road. Their bases sit a little
+	-- below the ground so the rim of each is buried.
+	local landforms = {
+		WastelandHighways = { "MountainWaste", "HillGrass" },
+		RuinedCity = { "TowerRuin", "TowerRuin" },
+		Desert = { "MesaDesert", "MesaDesert" },
+		SnowyMountains = { "MountainSnow", "MountainSnow" },
+	}
+	local names = landforms[biome] or landforms.WastelandHighways
+	for _, side in { -1, 1 } do
+		local name = names[rng:NextInteger(1, #names)]
+		local inner, outer = 66, 88
+		if name == "TowerRuin" then
+			inner, outer = 48, 90
+		elseif name == "HillGrass" then
+			inner, outer = 66, 86
+		end
+		local cf = CFrame.new(side * rng:NextNumber(inner, outer), -0.3, -z + rng:NextNumber(-18, 18))
+			* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
+		placeProp(name, cf, seg)
+		-- A second, farther one gives the horizon some depth.
+		if name ~= "TowerRuin" and rng:NextNumber() < 0.6 then
+			placeProp(name, CFrame.new(side * rng:NextNumber(150, 340), -0.3, -z + rng:NextNumber(-25, 25)) * CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0), seg)
+		end
 	end
 end
 
@@ -285,7 +315,8 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 	seg.Name = "Road_" .. tostring(z)
 
 	local ground = biomeColor(biome)
-	local asphalt = ground:Lerp(Color3.fromRGB(35, 35, 38), 0.55)
+	local asphalt = Color3.fromRGB(66, 68, 76)
+	local grassy = biome == "WastelandHighways" or biome == "RuinedCity"
 
 	local road = Instance.new("Part")
 	road.Name = "Asphalt"
@@ -333,22 +364,26 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		shoulder.Size = Vector3.new(12, 1.2, 60)
 		shoulder.Anchored = true
 		shoulder.Material = if biome == "SnowyMountains" then Enum.Material.Snow elseif biome == "Desert" then Enum.Material.Sand else Enum.Material.Ground
-		shoulder.Color = ground
+		shoulder.Color = if grassy then Color3.fromRGB(176, 148, 104) else ground
 		shoulder.CFrame = CFrame.new(x, -0.1, -z)
 		shoulder.Parent = seg
-		paintTop(shoulder, SURFACE.dirt, 8)
+		if not grassy then
+			paintTop(shoulder, SURFACE.dirt, 8)
+		end
 	end
 
-	local farMat = if biome == "SnowyMountains" then Enum.Material.Snow elseif biome == "Desert" then Enum.Material.Sand else Enum.Material.Ground
+	local farMat = if biome == "SnowyMountains" then Enum.Material.Snow elseif biome == "Desert" then Enum.Material.Sand else Enum.Material.Grass
 	local far = Instance.new("Part")
 	far.Name = "FarGround"
-	far.Size = Vector3.new(240, 2, 60)
+	far.Size = Vector3.new(1000, 2, 60)
 	far.Anchored = true
 	far.Material = farMat
 	far.Color = ground
-	far.CFrame = CFrame.new(0, -1.2, -z)
+	far.CFrame = CFrame.new(0, -0.9, -z) -- top at 0.1, clear of the place's Baseplate (top at 0)
 	far.Parent = seg
-	paintTop(far, SURFACE.dirt, 10)
+	if not grassy then
+		paintTop(far, SURFACE.dirt, 10)
+	end
 
 	for _, x in { -17, 17 } do
 		for n = -2, 2 do
@@ -361,10 +396,10 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 	-- Biome props. Names match Blender models in ServerStorage.ConvoyArt.
 	local rng = Random.new(z + (#biome * 17))
 	local roadside = {
-		WastelandHighways = { "Wreck", "BusWreck", "Barricade", "DeadTree", "RoadSign", "Rubble" },
-		RuinedCity = { "Ruin", "Rubble", "Billboard", "Jersey", "BusWreck" },
-		Desert = { "Rock", "Cactus", "RoadSign", "DeadTree" },
-		SnowyMountains = { "Pine", "Rock", "DeadTree", "Barricade" },
+		WastelandHighways = { "Pine", "Bush", "Bush", "Rock", "RoadSign", "Pine" },
+		RuinedCity = { "Ruin", "Bush", "Billboard", "Pine", "Bush" },
+		Desert = { "Rock", "Cactus", "Cactus", "RoadSign", "Bush" },
+		SnowyMountains = { "Pine", "Pine", "Rock", "Pine" },
 	}
 	local choices = roadside[biome] or { "Wreck", "Bush" }
 	for _ = 1, 7 do
@@ -374,7 +409,12 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		local yaw = CFrame.Angles(0, rng:NextNumber(0, math.pi), 0)
 		local groundCf = CFrame.new(px, 0.5, pz) * yaw
 		local pick = choices[rng:NextInteger(1, #choices)]
-		if not placeProp(pick, groundCf, seg) then
+		-- Greenery is tinted bright so the countryside reads fresh, not scorched.
+		local tint = nil
+		if (pick == "Pine" or pick == "Bush") and biome ~= "SnowyMountains" and biome ~= "Desert" then
+			tint = Color3.fromRGB(70, 170, 70):Lerp(Color3.fromRGB(110, 200, 60), rng:NextNumber())
+		end
+		if not placeProp(pick, groundCf, seg, tint) then
 			placeProp("Rock", groundCf, seg)
 		end
 		if biome == "Desert" then
@@ -383,7 +423,7 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		elseif biome == "SnowyMountains" then
 			placeProp("Rock", CFrame.new(px + side * 4, 0.5, pz - 6), seg, Color3.fromRGB(200, 205, 210))
 		elseif biome == "WastelandHighways" then
-			placeProp("Bush", CFrame.new(px + side * 2.5, 0.5, pz + 5), seg)
+			placeProp("Bush", CFrame.new(px + side * 2.5, 0.5, pz + 5), seg, Color3.fromRGB(90, 185, 70))
 		end
 	end
 	if biome == "WastelandHighways" or biome == "RuinedCity" then
@@ -408,6 +448,26 @@ local function refreshRoad(session: RunSession)
 		session.appliedBiome = biome
 	end
 	session.lastRoadDistance = session.distance
+
+	-- One huge flat sheet follows the convoy so past the last road segment the
+	-- horizon is still the biome's ground, not the place's bare baseplate.
+	local horizon = session.roadFolder:FindFirstChild("Horizon") :: Part?
+	if not horizon then
+		horizon = Instance.new("Part")
+		local sheet = horizon :: Part
+		sheet.Name = "Horizon"
+		sheet.Anchored = true
+		sheet.CanCollide = false
+		sheet.CanQuery = false
+		sheet.CastShadow = false
+		sheet.Size = Vector3.new(3000, 2, 3000)
+		sheet.Parent = session.roadFolder
+	end
+	local sheet = horizon :: Part
+	sheet.Material = if biome == "SnowyMountains" then Enum.Material.Snow elseif biome == "Desert" then Enum.Material.Sand else Enum.Material.Grass
+	sheet.Color = biomeColor(biome)
+	sheet.CFrame = CFrame.new(session.originX, -1 + 0.03, -session.distance)
+
 	local centerZ = session.distance
 	for _, child in session.roadFolder:GetChildren() do
 		local zAttr = tonumber(string.match(child.Name, "Road_(%-?%d+)"))

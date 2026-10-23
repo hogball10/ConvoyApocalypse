@@ -216,6 +216,11 @@ function DataService.Load(player: Player)
 			if ok or player.Parent == nil then
 				break
 			end
+			-- An unpublished place or blocked Studio API access will not fix itself in a few seconds.
+			local message = tostring(data)
+			if string.find(message, "publish", 1, true) or string.find(message, "Studio access", 1, true) or string.find(message, "403", 1, true) then
+				break
+			end
 			warn(string.format("[DataService] Load attempt %d/%d failed for %s: %s", attempt, LOAD_ATTEMPTS, player.Name, tostring(data)))
 			task.wait(attempt * 1.5)
 		end
