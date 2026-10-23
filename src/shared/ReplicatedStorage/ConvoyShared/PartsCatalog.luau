@@ -8,6 +8,7 @@
 -- in the car's own space).
 export type WeaponMount = {
 	partId: string,
+	blockIndex: number?, -- which placed block carries this gun, so it stops firing if that block falls off
 	kind: string,
 	damage: number,
 	fireRate: number,
@@ -1194,7 +1195,7 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 	local mounts: { WeaponMount } = {}
 	local weaponWeight = 0
 	local strongestRam = 0
-	for _, block in blocks do
+	for blockIndex, block in blocks do
 		local part = PartsCatalog.Get(block.partId)
 		if part then
 			if part.category == "Weapon" then
@@ -1206,6 +1207,7 @@ function PartsCatalog.ComputeBlockStats(blocks: { PlacedBlock })
 					local size = PartsCatalog.BlockSize(block.partId, block.rot)
 					table.insert(mounts, {
 						partId = block.partId,
+						blockIndex = blockIndex,
 						kind = PartsCatalog.BlockKind(block.partId),
 						damage = damage,
 						fireRate = rate,

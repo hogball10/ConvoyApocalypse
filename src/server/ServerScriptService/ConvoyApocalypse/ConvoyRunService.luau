@@ -86,6 +86,8 @@ local lastPositions: { [Model]: Vector3 } = setmetatable({}, { __mode = "k" }) :
 
 -- Fractional shots carried over between frames, per car.
 local fireCharge: { [Model]: { [number]: number } } = setmetatable({}, { __mode = "k" }) :: any
+-- Block indexes that have been shot off each car; their guns stop firing.
+local lostBlocks: { [Model]: { [number]: boolean } } = setmetatable({}, { __mode = "k" }) :: any
 local mountCache: { [Model]: { key: string, mounts: { any } } } = setmetatable({}, { __mode = "k" }) :: any
 local MAX_SHOTS_PER_FRAME = 4
 
@@ -826,6 +828,77 @@ local function fireWeapon(
 	end
 end
 
+-- Knocks one block off the car: it is unwelded, flung clear and fades away.
+local function detachBlock(vehicle: Model, piece: Instance)
+	local lost = lostBlocks[vehicle]
+	if not lost then
+		lost = {}
+		lostBlocks[vehicle] = lost
+	end
+	lost[piece:GetAttribute("BlockIndex") :: number] = true
+
+	local body = vehicle.PrimaryPart
+	local kick = Vector3.new(math.random(-14, 14), math.random(10, 22), math.random(-6, 6))
+	if body then
+		kick += body.AssemblyLinearVelocity
+	end
+	for _, desc in piece:GetDescendants() do
+		if desc:IsA("BasePart") then
+			for _, weldInstance in vehicle:GetDescendants() do
+				if weldInstance:IsA("WeldConstraint") and (weldInstance.Part1 == desc or weldInstance.Part0 == desc) then
+					weldInstance:Destroy()
+				end
+			end
+			desc.Massless = false
+			desc.CanCollide = false
+			desc.AssemblyLinearVelocity = kick
+			desc.AssemblyAngularVelocity = Vector3.new(math.random(-8, 8), math.random(-8, 8), math.random(-8, 8))
+		end
+	end
+	if piece:IsA("BasePart") then
+		piece.Massless = false
+		piece.CanCollide = false
+		piece.AssemblyLinearVelocity = kick
+	end
+	piece.Parent = workspace
+	Debris:AddItem(piece, 4)
+end
+
+-- The more health the car has lost, the more of its blocks have come off, one
+-- at a time. The seat stays so the driver is never left floating.
+local function shedBlocks(vehicle: Model)
+	local health = math.max(0, vehicle:GetAttribute("Health") :: number)
+	local maxHealth = vehicle:GetAttribute("MaxHealth") :: number
+	if maxHealth <= 0 then
+		return
+	end
+	local intact = {}
+	local total = 0
+	local lost = lostBlocks[vehicle] or {}
+	local gone = 0
+	for _ in lost do
+		gone += 1
+	end
+	total = gone
+	for _, child in vehicle:GetChildren() do
+		local index = child:GetAttribute("BlockIndex")
+		if child.Name == "Block" and index ~= nil then
+			total += 1
+			local partId = child:GetAttribute("PartId") :: string
+			if not lost[index] and PartsCatalog.BlockKind(partId) ~= "seat" then
+				table.insert(intact, child)
+			end
+		end
+	end
+	-- By the time health is gone about two thirds of the blocks have fallen off.
+	local shouldBeGone = math.floor((1 - health / maxHealth) * total * 0.66)
+	while gone < shouldBeGone and #intact > 0 do
+		local pick = table.remove(intact, math.random(1, #intact)) :: Instance
+		detachBlock(vehicle, pick)
+		gone += 1
+	end
+end
+
 function ConvoyRunService.DamageVehicle(session: RunSession, participant: Participant, rawDamage: number)
 	local vehicle = participant.vehicle
 	if not participant.alive then
@@ -846,6 +919,7 @@ function ConvoyRunService.DamageVehicle(session: RunSession, participant: Partic
 	end
 	local health = (vehicle:GetAttribute("Health") :: number) - damage
 	vehicle:SetAttribute("Health", health)
+	shedBlocks(vehicle)
 	if health <= 0 then
 		participant.alive = false
 		vehicle:SetAttribute("Alive", false)
@@ -1206,9 +1280,10 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		end
 
 		-- Every mounted weapon fires on its own timer; each kind fires
-		-- differently (see fireWeapon).
-		if fuel > 0 then
+		-- differently (see fireWeapon). Guns keep firing with an empty tank.
+		do
 			local mounts = mountsOf(vehicle)
+			local lost = lostBlocks[vehicle]
 			local live = nil
 			local charges = fireCharge[vehicle]
 			if not charges then
@@ -1218,8 +1293,9 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 			for index, mount in mounts do
 				-- Charge builds at fireRate per second and each whole point is a
 				-- shot, so fast guns really fire fast whatever the frame rate.
-				local charge = (charges[index] or 0) + mount.fireRate * dt
-				local shots = math.min(math.floor(charge), MAX_SHOTS_PER_FRAME)
+				local gone = lost ~= nil and mount.blockIndex ~= nil and lost[mount.blockIndex] == true
+				local charge = if gone then 0 else (charges[index] or 0) + mount.fireRate * dt
+				local shots = if gone then 0 else math.min(math.floor(charge), MAX_SHOTS_PER_FRAME)
 				charges[index] = if shots >= MAX_SHOTS_PER_FRAME then 0 else charge - shots
 				if shots > 0 then
 					live = live or targets(session, body)
