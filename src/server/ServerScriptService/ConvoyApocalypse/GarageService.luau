@@ -544,6 +544,15 @@ function GarageService.ReturnToGarage(player: Player, silent: boolean?)
 		return
 	end
 	local hostId = GarageService._playerGarage[player.UserId]
+	-- After a run everyone lands in the garage of whoever hosted it.
+	local runHost = ConvoyRunService.ReturnTarget[player.UserId]
+	ConvoyRunService.ReturnTarget[player.UserId] = nil
+	if runHost and GarageService._garages[runHost] and Players:GetPlayerByUserId(runHost) then
+		if hostId and hostId ~= runHost and GarageService._garages[hostId] then
+			GarageService._garages[hostId].occupants[player.UserId] = nil
+		end
+		hostId = runHost
+	end
 	if not hostId or not GarageService._garages[hostId] then
 		hostId = player.UserId
 	end
