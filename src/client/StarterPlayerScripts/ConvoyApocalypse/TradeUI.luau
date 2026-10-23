@@ -426,7 +426,7 @@ local function build()
 		panel.Visible = open
 		if open then
 			-- Same screen space as the shop panels, so only one is open at a time.
-			for _, name in { "Shop", "Passes" } do
+			for _, name in { "Menu", "Passes" } do
 				local other = player.PlayerGui:FindFirstChild(name)
 				local otherPanel = if other then other:FindFirstChild("Panel") else nil
 				if otherPanel and otherPanel:IsA("GuiObject") then

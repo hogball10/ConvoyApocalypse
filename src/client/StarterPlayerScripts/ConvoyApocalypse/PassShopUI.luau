@@ -156,11 +156,11 @@ local function build()
 		PassShopUI._rows[pass.id] = { buy = buy, status = status }
 	end
 
-	-- The boost shop sits in the same spot, so only one is open at a time.
+	-- The other panels sit in the same spot, so only one is open at a time.
 	local function setOpen(open: boolean)
 		panel.Visible = open
 		if open then
-			for _, other in { { "Shop", "Panel" }, { "Trade", "PlayersPanel" } } do
+			for _, other in { { "Menu", "Panel" }, { "Trade", "PlayersPanel" } } do
 				local otherGui = player.PlayerGui:FindFirstChild(other[1])
 				local otherPanel = if otherGui then otherGui:FindFirstChild(other[2]) else nil
 				if otherPanel and otherPanel:IsA("GuiObject") then

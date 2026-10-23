@@ -21,6 +21,7 @@ local EVENT_NAMES = {
 	"VehicleInput",
 	"ReturnToGarage",
 	"BuyGamepass",
+	"ProgressAction",
 	"FireWeapon",
 	"TradeRequest",
 	"TradeUpdate",
@@ -40,6 +41,8 @@ local EVENT_NAMES = {
 local FUNCTION_NAMES = {
 	"GetPlayerData",
 	"GetGarageOccupants",
+	"GetLeaderboards",
+	"GetOpenRuns",
 }
 
 local function getFolder(): Folder

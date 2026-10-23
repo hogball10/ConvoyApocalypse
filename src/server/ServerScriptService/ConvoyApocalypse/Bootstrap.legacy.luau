@@ -47,6 +47,8 @@ local ConvoyRunService = require(root:WaitForChild("ConvoyRunService"))
 local GarageService = require(root:WaitForChild("GarageService"))
 local TradeService = require(root:WaitForChild("TradeService"))
 local GamepassService = require(root:WaitForChild("GamepassService"))
+local ProgressService = require(root:WaitForChild("ProgressService"))
+local LeaderboardService = require(root:WaitForChild("LeaderboardService"))
 
 -- Data first; the rest each start on their own, so one failing service is
 -- reported in the log instead of silently stopping the others.
@@ -66,5 +68,7 @@ start("runs", ConvoyRunService.Init)
 start("garages", GarageService.Init)
 start("trading", TradeService.Init)
 start("gamepasses", GamepassService.Init)
+start("progress", ProgressService.Init)
+start("leaderboards", LeaderboardService.Init)
 
 print("[ConvoyApocalypse] Server ready")

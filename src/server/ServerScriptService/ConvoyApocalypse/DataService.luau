@@ -40,6 +40,13 @@ export type PlayerProfile = {
 	mostKills: number, -- most zombies killed in a single run
 	totalRuns: number,
 	ownedParts: { [string]: number }, -- inventory counts for tradeable extras (prototype: 1 per unlock)
+	prestige: number,
+	daily: { lastDay: number, streak: number }, -- last UTC day the reward was claimed
+	quests: { day: number, list: { { id: string, progress: number, claimed: boolean } } },
+	achievements: { [string]: boolean }, -- claimed
+	stats: { bossKills: number, pickups: number },
+	cosmetics: { owned: { [string]: boolean }, paint: string, trail: string, flag: string },
+	tutorialDone: boolean,
 }
 
 local DataService = {}
@@ -115,6 +122,13 @@ local function defaultProfile(): PlayerProfile
 		mostKills = 0,
 		totalRuns = 0,
 		ownedParts = owned,
+		prestige = 0,
+		daily = { lastDay = 0, streak = 0 },
+		quests = { day = 0, list = {} },
+		achievements = {},
+		stats = { bossKills = 0, pickups = 0 },
+		cosmetics = { owned = {}, paint = "", trail = "", flag = "" },
+		tutorialDone = false,
 	}
 end
 
@@ -290,6 +304,7 @@ function DataService.GetPublic(player: Player): any
 	end
 	local copy: any = deepCopy(profile)
 	copy.passes = deepCopy(DataService._passes[player.UserId] or {})
+	copy.serverDay = DataService.Today()
 	return copy
 end
 
@@ -419,6 +434,29 @@ function DataService.UpdateHighScore(player: Player, distance: number)
 	end
 end
 
+-- UTC day number; daily rewards and quests roll over when it changes.
+function DataService.Today(): number
+	return math.floor(os.time() / 86400)
+end
+
+-- Adds XP, rolling over levels (each new level pays scrap). Returns the new level
+-- and how many levels were gained. The caller replicates.
+function DataService.GrantXp(player: Player, xp: number): (number, number)
+	local profile = DataService._profiles[player.UserId]
+	if not profile then
+		return 1, 0
+	end
+	profile.xp += math.floor(xp)
+	local levelsGained = 0
+	while profile.xp >= Constants.XpToNext(profile.level) do
+		profile.xp -= Constants.XpToNext(profile.level)
+		profile.level += 1
+		levelsGained += 1
+		profile.scrap += Constants.LEVEL_UP_SCRAP * profile.level
+	end
+	return profile.level, levelsGained
+end
+
 -- Adds XP, rolling over levels. Each new level pays a scrap bonus.
 function DataService.AddRunProgress(player: Player, xp: number, kills: number): (number, number)
 	local profile = DataService._profiles[player.UserId]
@@ -428,16 +466,9 @@ function DataService.AddRunProgress(player: Player, xp: number, kills: number): 
 	profile.totalRuns += 1
 	profile.totalKills += kills
 	profile.mostKills = math.max(profile.mostKills, kills)
-	profile.xp += math.floor(xp)
-	local levelsGained = 0
-	while profile.xp >= Constants.XpToNext(profile.level) do
-		profile.xp -= Constants.XpToNext(profile.level)
-		profile.level += 1
-		levelsGained += 1
-		profile.scrap += Constants.LEVEL_UP_SCRAP * profile.level
-	end
+	local level, levelsGained = DataService.GrantXp(player, xp)
 	DataService.Replicate(player)
-	return profile.level, levelsGained
+	return level, levelsGained
 end
 
 -- Perk multipliers from the gamepasses a player owns; they multiply together.
@@ -448,6 +479,11 @@ function DataService.BoostEffect(player: Player, key: string): number
 		if pass and pass.effects[key] then
 			total *= pass.effects[key]
 		end
+	end
+	-- Prestige makes every scrap and XP payout a little bigger, permanently.
+	local profile = DataService._profiles[player.UserId]
+	if profile and profile.prestige > 0 and (key == "scrapMult" or key == "xpMult") then
+		total *= 1 + Constants.PRESTIGE_BONUS * profile.prestige
 	end
 	return total
 end

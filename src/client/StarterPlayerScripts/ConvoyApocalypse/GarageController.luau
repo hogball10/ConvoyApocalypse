@@ -805,7 +805,7 @@ function GarageController.SetInRun(inRun: boolean)
 	if inRun then
 		clearHold()
 	end
-	for _, name in { "Inventory", "Shop", "Passes", "Trade", "ScrapBar" } do
+	for _, name in { "Inventory", "Menu", "Tutorial", "Passes", "Trade", "ScrapBar" } do
 		local gui = player.PlayerGui:FindFirstChild(name)
 		if gui and gui:IsA("ScreenGui") then
 			gui.Enabled = not inRun

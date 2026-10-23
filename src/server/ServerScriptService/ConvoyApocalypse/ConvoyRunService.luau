@@ -19,6 +19,8 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local DataService = require(script.Parent:WaitForChild("DataService"))
 local VehicleFactory = require(script.Parent:WaitForChild("VehicleFactory"))
 local ArtKit = require(script.Parent:WaitForChild("ArtKit"))
+local ProgressService = require(script.Parent:WaitForChild("ProgressService"))
+local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardService"))
 
 export type Participant = {
 	player: Player,
@@ -27,6 +29,10 @@ export type Participant = {
 	alive: boolean,
 	outOfFuel: boolean,
 	killScrap: number, -- scrap already paid out for kills this run
+	boostUntil: number, -- os.clock() until a boost pad's speed-up wears off
+	rampUntil: number, -- ramps cannot re-launch a car before this
+	reviveTimer: number, -- seconds a teammate has spent next to this wreck
+	left: boolean, -- ended their own run: not revivable
 	pickups: number,
 	bossKills: number,
 	-- Latest steering sent by the player's client, and when it arrived.
@@ -58,6 +64,12 @@ export type RunSession = {
 	-- road: lane number, and the X that lane's road runs down.
 	lane: number,
 	originX: number,
+	-- Boost pads and ramps in the road, in world space (half width / half length).
+	pads: { { kind: string, x: number, z: number, hw: number, hl: number } },
+	-- Seconds the run has lasted, and the timed event (horde, kill rush...) in play.
+	runClock: number,
+	nextEvent: number,
+	event: { kind: string, name: string, text: string, endsAt: number, goal: number, progress: number, reward: number }?,
 }
 
 -- Lanes are this far apart. The road's far ground is 1000 wide so the world runs
@@ -311,7 +323,13 @@ end
 
 -- Built around X = 0, then slid over to the run's lane once it is complete, so
 -- the segment never shows up half-built or in the wrong place.
-local function buildRoadSegment(parent: Folder, z: number, biome: string, originX: number)
+local function buildRoadSegment(
+	parent: Folder,
+	z: number,
+	biome: string,
+	originX: number,
+	pads: { { kind: string, x: number, z: number, hw: number, hl: number } }?
+)
 	local seg = Instance.new("Model")
 	seg.Name = "Road_" .. tostring(z)
 
@@ -438,6 +456,55 @@ local function buildRoadSegment(parent: Folder, z: number, biome: string, origin
 		placeProp("Antenna", CFrame.new(side, 0.5, -z + 6), seg)
 	end
 
+	-- Boost pads speed the car up, ramps launch it. They are found by position
+	-- each frame (see Step), so the parts themselves are only decoration.
+	if pads then
+		local padRng = Random.new(z * 13 + 5)
+		if padRng:NextNumber() < 0.5 then
+			local px = padRng:NextNumber(-9, 9)
+			local pz = -z + padRng:NextNumber(-24, -6)
+			local plate = Instance.new("Part")
+			plate.Name = "BoostPad"
+			plate.Size = Vector3.new(6, 0.15, 9)
+			plate.Anchored = true
+			plate.CanCollide = false
+			plate.CanQuery = false
+			plate.Material = Enum.Material.Neon
+			plate.Color = Color3.fromRGB(60, 220, 255)
+			plate.CFrame = CFrame.new(px, 0.58, pz)
+			plate.Parent = seg
+			for i = -1, 1 do
+				local chevron = Instance.new("Part")
+				chevron.Name = "BoostChevron"
+				chevron.Size = Vector3.new(4.4, 0.05, 0.7)
+				chevron.Anchored = true
+				chevron.CanCollide = false
+				chevron.CanQuery = false
+				chevron.Material = Enum.Material.SmoothPlastic
+				chevron.Color = Color3.fromRGB(10, 70, 110)
+				chevron.CFrame = CFrame.new(px, 0.67, pz + i * 2.6)
+				chevron.Parent = seg
+			end
+			table.insert(pads, { kind = "Boost", x = originX + px, z = pz, hw = 3, hl = 4.5 })
+		end
+		if padRng:NextNumber() < 0.28 then
+			local px = padRng:NextNumber(-8, 8)
+			local pz = -z + padRng:NextNumber(6, 24)
+			local ramp = Instance.new("WedgePart")
+			ramp.Name = "Ramp"
+			ramp.Size = Vector3.new(8, 1.8, 10)
+			ramp.Anchored = true
+			ramp.CanCollide = false
+			ramp.CanQuery = false
+			ramp.Material = Enum.Material.SmoothPlastic
+			ramp.Color = Color3.fromRGB(255, 200, 40)
+			-- Low at the near end, rising toward -Z, the way the cars drive.
+			ramp.CFrame = CFrame.new(px, 1.4, pz) * CFrame.Angles(0, math.pi, 0)
+			ramp.Parent = seg
+			table.insert(pads, { kind = "Ramp", x = originX + px, z = pz, hw = 4, hl = 5 })
+		end
+	end
+
 	seg:TranslateBy(Vector3.new(originX, 0, 0))
 	seg.Parent = parent
 end
@@ -476,24 +543,125 @@ local function refreshRoad(session: RunSession)
 			child:Destroy()
 		end
 	end
+	for index = #session.pads, 1, -1 do
+		if math.abs(-session.pads[index].z - centerZ) > 260 then
+			table.remove(session.pads, index)
+		end
+	end
 	for i = -2, 6 do
 		local z = math.floor((centerZ + i * 60) / 60) * 60
 		local name = "Road_" .. tostring(z)
 		if not session.roadFolder:FindFirstChild(name) then
-			buildRoadSegment(session.roadFolder, z, biome, session.originX)
+			buildRoadSegment(session.roadFolder, z, biome, session.originX, session.pads)
 		end
 	end
 end
 
-local function spawnZombie(session: RunSession, isBoss: boolean?)
+-- Bosses take turns, so each thousand metres brings a different kind of fight.
+local BOSS_KINDS = { "juggernaut", "spitterking", "callerking" }
+
+local ZOMBIE_NAMES = {
+	walker = "Walker",
+	runner = "Runner",
+	brute = "Brute",
+	juggernaut = "Juggernaut",
+	spitterking = "Spitter King",
+	callerking = "Horde Caller",
+	spitter = "Spitter",
+	exploder = "Exploder",
+	armored = "Armored",
+	warlord = "Warlord",
+}
+
+-- A glob of acid that homes in on a car. Anything it reaches takes `damage`.
+local function spit(session: RunSession, from: Vector3, participant: Participant, damage: number)
+	local target = participant.vehicle.PrimaryPart
+	if not target then
+		return
+	end
+	local ball = Instance.new("Part")
+	ball.Name = "Acid"
+	ball.Shape = Enum.PartType.Ball
+	ball.Size = Vector3.new(1.8, 1.8, 1.8)
+	ball.Anchored = true
+	ball.CanCollide = false
+	ball.CanQuery = false
+	ball.CanTouch = false
+	ball.Material = Enum.Material.Neon
+	ball.Color = Color3.fromRGB(140, 255, 70)
+	ball.Position = from + Vector3.new(0, 2.5, 0)
+	ball.Parent = Workspace
+	task.spawn(function()
+		local life = 0
+		while ball.Parent and life < 3 and session.active and target.Parent do
+			local toCar = target.Position + Vector3.new(0, 1, 0) - ball.Position
+			local dist = toCar.Magnitude
+			if dist < 4 then
+				if participant.alive then
+					ConvoyRunService.DamageVehicle(session, participant, damage)
+				end
+				break
+			end
+			ball.Position += toCar.Unit * math.min(70 * 0.03, dist)
+			life += 0.03
+			task.wait(0.03)
+		end
+		ball:Destroy()
+	end)
+end
+
+-- A burst that hurts every car in range. The blast itself pushes nothing.
+local function explodeAt(session: RunSession, position: Vector3, damage: number, radius: number)
+	local blast = Instance.new("Explosion")
+	blast.Position = position
+	blast.BlastRadius = 7
+	blast.BlastPressure = 0
+	blast.DestroyJointRadiusPercent = 0
+	blast.Parent = Workspace
+	for _, participant in session.participants do
+		local body = participant.vehicle.PrimaryPart
+		if participant.alive and body and (body.Position - position).Magnitude < radius then
+			ConvoyRunService.DamageVehicle(session, participant, damage)
+		end
+	end
+end
+
+local function spawnZombie(session: RunSession, isBoss: boolean?, forcedKind: string?)
 	local biomeName, _ = getBiome(session.distance)
 	local scale = 1 + session.distance / 800
 	local boss = isBoss == true
-	local isRunner = not boss and session.distance > 300 and math.random() < 0.25
-	local isBrute = boss or (session.distance > 700 and math.random() < 0.12)
+	local kind = forcedKind or "walker"
+	if boss then
+		kind = BOSS_KINDS[((math.max(session.bossesSpawned, 1) - 1) % #BOSS_KINDS) + 1]
+	elseif not forcedKind then
+		-- Special zombies join in as the road goes on.
+		local roll = math.random()
+		if session.distance > 250 and roll < 0.10 then
+			kind = "spitter"
+		elseif session.distance > 400 and roll < 0.18 then
+			kind = "exploder"
+		elseif session.distance > 900 and roll < 0.25 then
+			kind = "armored"
+		elseif session.distance > 300 and roll < 0.45 then
+			kind = "runner"
+		end
+	end
+	local isRunner = kind == "runner"
+	local isSpitter = kind == "spitter" or kind == "spitterking"
+	local isExploder = kind == "exploder"
+	local isArmored = kind == "armored"
+	local isWarlord = kind == "warlord"
+	local isCaller = kind == "callerking"
+	local isBrute = boss
+		or isWarlord
+		or isArmored
+		or (kind == "walker" and session.distance > 700 and math.random() < 0.12)
+	if isBrute and kind == "walker" then
+		kind = "brute"
+	end
 
 	local zombie = Instance.new("Model")
-	zombie.Name = if boss then "Juggernaut" elseif isBrute then "Brute" elseif isRunner then "Runner" else "Walker"
+	zombie.Name = ZOMBIE_NAMES[kind] or "Walker"
 
 	local skin = if biomeName == "SnowyMountains"
 		then Color3.fromRGB(170, 185, 175)
@@ -504,6 +672,17 @@ local function spawnZombie(session: RunSession, isBoss: boolean?)
 	end
 	if isBrute then
 		skin = skin:Lerp(Color3.fromRGB(40, 40, 50), 0.4)
+	end
+	local kindTint = {
+		spitter = Color3.fromRGB(150, 205, 60),
+		spitterking = Color3.fromRGB(110, 235, 70),
+		exploder = Color3.fromRGB(240, 115, 40),
+		armored = Color3.fromRGB(125, 132, 150),
+		warlord = Color3.fromRGB(150, 35, 35),
+		callerking = Color3.fromRGB(165, 85, 205),
+	}
+	if kindTint[kind] then
+		skin = skin:Lerp(kindTint[kind], 0.75)
 	end
 
 	local body = Instance.new("Part")
@@ -526,7 +705,14 @@ local function spawnZombie(session: RunSession, isBoss: boolean?)
 		body.Transparency = 1
 		local visual = ArtKit.Place(zombieArt, body.CFrame, false)
 		visual.Name = "ZombieMesh"
-		local scale = if boss then 2.4 elseif isBrute then 1.4 elseif isRunner then 0.88 else 1
+		local scale = if boss
+			then 2.4
+			elseif isWarlord then 2.0
+			elseif isArmored then 1.5
+			elseif isBrute then 1.4
+			elseif isRunner then 0.88
+			elseif isExploder then 1.1
+			else 1
 		local pieces: { BasePart } = {}
 		if visual:IsA("BasePart") then
 			visual.Color = skin
@@ -593,22 +779,41 @@ local function spawnZombie(session: RunSession, isBoss: boolean?)
 	end
 
 	local hum = Instance.new("Humanoid")
-	hum.MaxHealth = Constants.ZOMBIE_BASE_HEALTH * scale * (if boss then 12 elseif isBrute then 2.5 else 1) * (if isRunner then 0.7 else 1)
+	local healthMult = if boss
+		then 12
+		elseif isWarlord then 6
+		elseif isArmored then 5
+		elseif isBrute then 2.5
+		elseif isSpitter then 0.8
+		else 1
+	hum.MaxHealth = Constants.ZOMBIE_BASE_HEALTH * scale * healthMult * (if isRunner then 0.7 else 1)
 	hum.Health = hum.MaxHealth
-	hum.WalkSpeed = Constants.ZOMBIE_BASE_SPEED * (if isRunner then 1.8 else 1) * (if isBrute then 0.7 else 1) * math.min(scale, 2)
+	hum.WalkSpeed = Constants.ZOMBIE_BASE_SPEED
+		* (if isRunner then 1.8 elseif isExploder then 1.35 elseif isSpitter then 0.9 else 1)
+		* (if isArmored then 0.6 elseif isBrute then 0.7 else 1)
+		* math.min(scale, 2)
 	hum.HipHeight = body.Size.Y * 0.5
 	hum.Parent = zombie
 
 	zombie.PrimaryPart = body
 
-	zombie:SetAttribute("Damage", Constants.ZOMBIE_BASE_DAMAGE * scale * (if boss then 3 elseif isBrute then 2 else 1))
+	zombie:SetAttribute("Damage", Constants.ZOMBIE_BASE_DAMAGE * scale * (if boss then 3 elseif isWarlord then 2.5 elseif isBrute then 2 else 1))
 	zombie:SetAttribute("Boss", boss)
+	zombie:SetAttribute("Kind", kind)
+	-- Tougher zombies drop a little extra scrap when they fall.
+	zombie:SetAttribute("BonusScrap", if isWarlord then 100 elseif isArmored then 15 elseif isExploder then 8 elseif isSpitter then 5 else 0)
 	zombie:SetAttribute("RunId", session.id)
 	zombie.Parent = session.zombieFolder
 
-	-- Simple chase toward nearest alive vehicle
+	-- Chase the nearest alive vehicle. Spitters hold back and spit, exploders go
+	-- off next to a car, and the Horde Caller keeps calling reinforcements.
 	task.spawn(function()
+		local lastSpit = 0
+		local lastCall = os.clock()
+		local spitGap = if kind == "spitterking" then 1.1 else 2.4
+		local spitRange = if kind == "spitterking" then 95 else 60
 		while zombie.Parent and hum.Health > 0 and session.active do
+			local nearestParticipant: Participant? = nil
 			local nearest: BasePart? = nil
 			local nearestDist = math.huge
 			for _, participant in session.participants do
@@ -617,16 +822,37 @@ local function spawnZombie(session: RunSession, isBoss: boolean?)
 					if d < nearestDist then
 						nearestDist = d
 						nearest = participant.vehicle.PrimaryPart
+						nearestParticipant = participant
 					end
 				end
 			end
-			if nearest then
-				hum:MoveTo(nearest.Position)
+			if nearest and nearestParticipant then
+				local damage = zombie:GetAttribute("Damage") :: number
+				if isSpitter and nearestDist < spitRange and nearestDist > 18 then
+					hum:MoveTo(body.Position)
+					if os.clock() - lastSpit >= spitGap then
+						lastSpit = os.clock()
+						spit(session, body.Position, nearestParticipant, damage * 0.8)
+					end
+				else
+					hum:MoveTo(nearest.Position)
+				end
+				if isCaller and os.clock() - lastCall >= 8 then
+					lastCall = os.clock()
+					for _ = 1, 4 do
+						spawnZombie(session, false, "walker")
+					end
+				end
+				if isExploder and nearestDist < 10 then
+					explodeAt(session, body.Position, damage * 3, 16)
+					zombie:Destroy()
+					return
+				end
 				-- Contact damage
 				if nearestDist < 6 then
 					for _, participant in session.participants do
 						if participant.alive and participant.vehicle.PrimaryPart == nearest then
-							ConvoyRunService.DamageVehicle(session, participant, zombie:GetAttribute("Damage") :: number)
+							ConvoyRunService.DamageVehicle(session, participant, damage)
 						end
 					end
 				end
@@ -645,9 +871,16 @@ local function creditKill(session: RunSession, participant: Participant, zombie:
 	participant.vehicle:SetAttribute("Kills", participant.kills)
 	-- Every kill pays out straight away, so the scrap counter climbs as you play.
 	local scrapMult = (participant.vehicle:GetAttribute("ScrapMult") :: number?) or 1
-	local gain = math.floor(Constants.SCRAP_PER_KILL * scrapMult)
+	local bonus = (zombie:GetAttribute("BonusScrap") :: number?) or 0
+	local gain = math.floor((Constants.SCRAP_PER_KILL + bonus) * scrapMult)
 	participant.killScrap += gain
+	ProgressService.OnKill(participant.player, zombie:GetAttribute("Boss") == true)
 	DataService.AddScrap(participant.player, gain)
+	-- Kill Rush counts every zombie the convoy takes down.
+	local event = session.event
+	if event and event.kind == "KillRush" then
+		event.progress += 1
+	end
 	local siphon = (participant.vehicle:GetAttribute("FuelPerKill") :: number?) or 0
 	if siphon > 0 then
 		local maxFuel = participant.vehicle:GetAttribute("MaxFuel") :: number
@@ -657,7 +890,7 @@ local function creditKill(session: RunSession, participant: Participant, zombie:
 	if zombie:GetAttribute("Boss") == true then
 		participant.bossKills += 1
 		for _, p in session.participants do
-			notify(p.player, participant.player.Name .. " took down a JUGGERNAUT!")
+			notify(p.player, participant.player.Name .. " took down the " .. string.upper(zombie.Name) .. "!")
 		end
 	end
 	zombie:Destroy()
@@ -672,7 +905,7 @@ local PICKUP_RADIUS = 9
 local PICKUP_INTERVAL = 6
 local BOSS_EVERY = 1000
 
-local function spawnPickup(session: RunSession)
+local function spawnPickup(session: RunSession, forcedKind: string?, ahead: number?, laneX: number?)
 	local total = 0
 	for _, k in PICKUP_KINDS do
 		total += k.weight
@@ -686,6 +919,13 @@ local function spawnPickup(session: RunSession)
 			break
 		end
 	end
+	if forcedKind then
+		for _, k in PICKUP_KINDS do
+			if k.kind == forcedKind then
+				chosen = k
+			end
+		end
+	end
 
 	local part = Instance.new("Part")
 	part.Name = "Pickup_" .. chosen.kind
@@ -697,7 +937,11 @@ local function spawnPickup(session: RunSession)
 	part.CanTouch = false
 	part.Material = Enum.Material.Neon
 	part.Color = chosen.color
-	part.Position = Vector3.new(session.originX + (math.random() - 0.5) * 24, 3.5, -(session.distance + 140 + math.random(0, 60)))
+	part.Position = Vector3.new(
+		session.originX + (laneX or (math.random() - 0.5) * 24),
+		3.5,
+		-(session.distance + (ahead or (140 + math.random(0, 60))))
+	)
 	part:SetAttribute("Kind", chosen.kind)
 	local light = Instance.new("PointLight")
 	light.Color = chosen.color
@@ -724,6 +968,7 @@ local function collectPickup(participant: Participant, pickup: BasePart)
 		notify(participant.player, "+25 scrap")
 	end
 	participant.pickups += 1
+	ProgressService.OnPickup(participant.player)
 	pickup:Destroy()
 end
 
@@ -1227,6 +1472,10 @@ function ConvoyRunService.Start(host: Player)
 		appliedBiome = nil,
 		lane = lane,
 		originX = originX,
+		pads = {},
+		runClock = 0,
+		nextEvent = 30,
+		event = nil,
 	}
 
 	local participant: Participant = {
@@ -1236,6 +1485,10 @@ function ConvoyRunService.Start(host: Player)
 		alive = true,
 		outOfFuel = false,
 		killScrap = 0,
+		boostUntil = 0,
+		rampUntil = 0,
+		reviveTimer = 0,
+		left = false,
 		pickups = 0,
 		bossKills = 0,
 		throttle = 0,
@@ -1298,6 +1551,10 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 		alive = true,
 		outOfFuel = false,
 		killScrap = 0,
+		boostUntil = 0,
+		rampUntil = 0,
+		reviveTimer = 0,
+		left = false,
 		pickups = 0,
 		bossKills = 0,
 		throttle = 0,
@@ -1312,6 +1569,117 @@ function ConvoyRunService.Join(player: Player, hostUserId: number)
 		Remotes.Event("RunState"):FireClient(p.player, ConvoyRunService.Serialize(session))
 	end
 	notify(player, "Joined convoy!")
+end
+
+-- ── Events and revives ─────────────────────────────────────────────────────
+
+-- Timed events break up the driving: a horde, a fuel drop, a Warlord or a kill rush.
+local EVENT_KINDS = { "Horde", "FuelDrop", "Warlord", "KillRush" }
+local REVIVE_RANGE = 20
+local REVIVE_SECONDS = 3
+
+local function announce(session: RunSession, message: string)
+	for _, participant in session.participants do
+		notify(participant.player, message)
+	end
+end
+
+local function payAlive(session: RunSession, scrap: number)
+	for _, participant in session.participants do
+		if participant.alive then
+			local mult = (participant.vehicle:GetAttribute("ScrapMult") :: number?) or 1
+			DataService.AddScrap(participant.player, math.floor(scrap * mult))
+		end
+	end
+end
+
+local function scheduleEvent(session: RunSession)
+	session.event = nil
+	session.nextEvent = session.runClock + math.random(45, 70)
+end
+
+local function startEvent(session: RunSession)
+	local kind = EVENT_KINDS[math.random(1, #EVENT_KINDS)]
+	local now = session.runClock
+	if kind == "Horde" then
+		session.event = { kind = kind, name = "HORDE", text = "A horde is swarming in. Survive it!", endsAt = now + 14, goal = 0, progress = 0, reward = 200 }
+	elseif kind == "FuelDrop" then
+		for i = 1, 5 do
+			spawnPickup(session, "Fuel", 110 + i * 26, if i % 2 == 0 then 5 else -5)
+		end
+		session.event = { kind = kind, name = "FUEL DROP", text = "Fuel crates ahead. Grab them!", endsAt = now + 9, goal = 0, progress = 0, reward = 0 }
+	elseif kind == "Warlord" then
+		spawnZombie(session, false, "warlord")
+		session.event = { kind = kind, name = "WARLORD", text = "A Warlord is hunting the convoy!", endsAt = now + 30, goal = 0, progress = 0, reward = 0 }
+	else
+		session.event = { kind = "KillRush", name = "KILL RUSH", text = "Kill 20 zombies in 25 seconds", endsAt = now + 25, goal = 20, progress = 0, reward = 300 }
+	end
+	local event = session.event :: any
+	announce(session, event.name .. "! " .. event.text)
+end
+
+local function updateEvents(session: RunSession, dt: number)
+	session.runClock += dt
+	local event = session.event
+	if event then
+		if event.kind == "KillRush" and event.progress >= event.goal then
+			payAlive(session, event.reward)
+			announce(session, string.format("Kill Rush complete! +%d scrap", event.reward))
+			scheduleEvent(session)
+		elseif session.runClock >= event.endsAt then
+			if event.kind == "Horde" then
+				payAlive(session, event.reward)
+				announce(session, string.format("Horde survived! +%d scrap", event.reward))
+			elseif event.kind == "KillRush" then
+				announce(session, "Kill Rush failed. Next time!")
+			end
+			scheduleEvent(session)
+		end
+	elseif session.runClock >= session.nextEvent then
+		startEvent(session)
+	end
+end
+
+-- Park an alive teammate next to a wreck for a few seconds and it comes back.
+local function reviveWrecks(session: RunSession, dt: number)
+	for _, wreck in session.participants do
+		local wreckBody = wreck.vehicle.PrimaryPart
+		if wreck.alive or wreck.left or not wreckBody then
+			continue
+		end
+		local helper: Participant? = nil
+		for _, other in session.participants do
+			local otherBody = other.vehicle.PrimaryPart
+			if other.alive and otherBody and (otherBody.Position - wreckBody.Position).Magnitude < REVIVE_RANGE then
+				helper = other
+				break
+			end
+		end
+		if helper then
+			if wreck.reviveTimer == 0 then
+				notify(helper.player, "Stay close to " .. wreck.player.Name .. " to revive them")
+				notify(wreck.player, helper.player.Name .. " is reviving you...")
+			end
+			wreck.reviveTimer += dt
+			if wreck.reviveTimer >= REVIVE_SECONDS then
+				local helperBody = helper.vehicle.PrimaryPart :: BasePart
+				local car = wreck.vehicle
+				wreck.reviveTimer = 0
+				wreck.alive = true
+				wreck.outOfFuel = false
+				car:SetAttribute("Alive", true)
+				car:SetAttribute("Health", (car:GetAttribute("MaxHealth") :: number) * 0.4)
+				car:SetAttribute("Shield", 0)
+				car:SetAttribute("Fuel", math.max(car:GetAttribute("Fuel") :: number, (car:GetAttribute("MaxFuel") :: number) * 0.3))
+				wreckBody.AssemblyLinearVelocity = Vector3.zero
+				wreckBody.CFrame = CFrame.new(helperBody.Position + Vector3.new(8, 0.6, 6))
+				notify(wreck.player, "You were revived by " .. helper.player.Name .. "!")
+				notify(helper.player, "Revived " .. wreck.player.Name)
+			end
+		else
+			wreck.reviveTimer = math.max(0, wreck.reviveTimer - dt)
+		end
+	end
 end
 
 function ConvoyRunService.Step(session: RunSession, dt: number)
@@ -1344,6 +1712,24 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		local boostMult = vehicle:GetAttribute("BoostMult") :: number
 		local fuel = vehicle:GetAttribute("Fuel") :: number
 
+		-- Boost pads speed the car up; ramps launch it.
+		local launching = false
+		do
+			local at = body.Position
+			local now = os.clock()
+			for _, pad in session.pads do
+				if math.abs(at.X - pad.x) < pad.hw + 1.5 and math.abs(at.Z - pad.z) < pad.hl + 1 then
+					if pad.kind == "Boost" then
+						participant.boostUntil = now + 2.2
+					elseif now >= participant.rampUntil then
+						participant.rampUntil = now + 1.5
+						launching = true
+					end
+				end
+			end
+		end
+		local boosting = os.clock() < participant.boostUntil
+
 		-- Direct velocity drive (reliable prototype feel). WASD via VehicleSeat.
 		local handling = vehicle:GetAttribute("Handling") :: number
 		local targetSpeed = 0
@@ -1355,12 +1741,22 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		end
 		end
 
+		if boosting and fuel > 0 then
+			targetSpeed = math.max(targetSpeed, speedStat * 0.6) * 1.7
+		end
+
 		local forward = body.CFrame.LookVector
 		local right = body.CFrame.RightVector
 		local vel = body.AssemblyLinearVelocity
 		local desired = forward * targetSpeed + right * (steer * speedStat * 0.35)
 		local blend = math.clamp(accel * 0.08 * dt * 60, 0.05, 1)
+		if boosting then
+			blend = math.max(blend, 0.3)
+		end
 		local newVel = vel:Lerp(Vector3.new(desired.X, vel.Y, desired.Z), blend)
+		if launching then
+			newVel = Vector3.new(newVel.X * 1.15, 78, newVel.Z * 1.15)
+		end
 		body.AssemblyLinearVelocity = newVel
 
 		-- The road runs straight down -Z, so the heading is kept within a cone
@@ -1463,6 +1859,9 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 		end
 	end
 
+	reviveWrecks(session, dt)
+	updateEvents(session, dt)
+
 	session.distance = math.max(session.distance, leadDistance)
 	local _, biomeIndex = getBiome(session.distance)
 	session.biomeIndex = biomeIndex
@@ -1471,12 +1870,13 @@ function ConvoyRunService.Step(session: RunSession, dt: number)
 	end
 
 	-- Spawn zombies
-	session.nextZombie -= dt
+	local horde = session.event ~= nil and session.event.kind == "Horde"
+	session.nextZombie -= dt * (if horde then 4 else 1)
 	local density = Constants.ZOMBIE_SPAWN_INTERVAL / (1 + session.distance / 1000)
 	if session.nextZombie <= 0 then
 		session.nextZombie = density
 		local count = 1 + math.floor(session.distance / 1500)
-		local headroom = MAX_ZOMBIES - #session.zombieFolder:GetChildren()
+		local headroom = MAX_ZOMBIES + (if horde then 20 else 0) - #session.zombieFolder:GetChildren()
 		for _ = 1, math.min(count, headroom) do
 			spawnZombie(session)
 		end
@@ -1553,6 +1953,7 @@ function ConvoyRunService.Serialize(session: RunSession): any
 			name = participant.player.Name,
 		}
 	end
+	local event = session.event
 	return {
 		runId = session.id,
 		distance = session.distance,
@@ -1560,6 +1961,16 @@ function ConvoyRunService.Serialize(session: RunSession): any
 		active = session.active,
 		vehicles = vehicles,
 		hostUserId = session.hostUserId,
+		event = if event
+			then {
+				kind = event.kind,
+				name = event.name,
+				text = event.text,
+				timeLeft = math.max(0, event.endsAt - session.runClock),
+				goal = event.goal,
+				progress = event.progress,
+			}
+			else nil,
 	}
 end
 
@@ -1594,6 +2005,8 @@ function ConvoyRunService.EndRun(session: RunSession)
 		DataService.AddScrap(participant.player, total - killScrap)
 		DataService.UpdateHighScore(participant.player, distance)
 		local level, levelsGained = DataService.AddRunProgress(participant.player, xp, participant.kills)
+		LeaderboardService.Submit(participant.player, distance, participant.kills)
+		ProgressService.OnRunEnd(participant.player, distance)
 		DataService.Save(participant.player)
 		notify(
 			participant.player,
@@ -1669,6 +2082,29 @@ function ConvoyRunService.EndRun(session: RunSession)
 end
 
 function ConvoyRunService.Init()
+	ProgressService.IsInRun = ConvoyRunService.IsInRun
+
+	-- Runs other players can drive into, for the party list.
+	Remotes.Function("GetOpenRuns").OnServerInvoke = function(_player: Player)
+		local list = {}
+		for _, session in ConvoyRunService._runs do
+			if session.active then
+				local host = Players:GetPlayerByUserId(session.hostUserId)
+				local count = 0
+				for _ in session.participants do
+					count += 1
+				end
+				table.insert(list, {
+					hostUserId = session.hostUserId,
+					name = if host then host.Name else "?",
+					players = count,
+					distance = math.floor(session.distance),
+				})
+			end
+		end
+		return list
+	end
+
 	Remotes.Event("StartRun").OnServerEvent:Connect(function(player)
 		ConvoyRunService.Start(player)
 	end)
@@ -1703,6 +2139,7 @@ function ConvoyRunService.Init()
 		local participant = session.participants[player.UserId]
 		if participant then
 			participant.alive = false
+			participant.left = true
 			participant.vehicle:SetAttribute("Alive", false)
 		end
 		ConvoyRunService.CheckEnd(session)

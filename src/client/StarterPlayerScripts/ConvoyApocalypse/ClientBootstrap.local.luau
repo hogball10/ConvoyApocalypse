@@ -13,12 +13,18 @@ local RunHUD = require(script.Parent:WaitForChild("RunHUD"))
 local VehicleControls = require(script.Parent:WaitForChild("VehicleControls"))
 local PassShopUI = require(script.Parent:WaitForChild("PassShopUI"))
 local TradeUI = require(script.Parent:WaitForChild("TradeUI"))
+local MenuUI = require(script.Parent:WaitForChild("MenuUI"))
+local TutorialUI = require(script.Parent:WaitForChild("TutorialUI"))
+local SoundFX = require(script.Parent:WaitForChild("SoundFX"))
 
 GarageController.Init()
 
 VehicleControls.Init()
 PassShopUI.Init()
 TradeUI.Init()
+MenuUI.Init()
+TutorialUI.Init()
+SoundFX.Init()
 
 RunHUD.Init(function()
 	GarageController.SetInRun(false)

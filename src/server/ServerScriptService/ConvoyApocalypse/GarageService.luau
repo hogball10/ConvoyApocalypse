@@ -21,6 +21,7 @@ local DataService = require(script.Parent:WaitForChild("DataService"))
 local VehicleFactory = require(script.Parent:WaitForChild("VehicleFactory"))
 local ConvoyRunService = require(script.Parent:WaitForChild("ConvoyRunService"))
 local ArtKit = require(script.Parent:WaitForChild("ArtKit"))
+local ProgressService = require(script.Parent:WaitForChild("ProgressService"))
 
 export type GarageSession = {
 	hostUserId: number,
@@ -1082,6 +1083,13 @@ function GarageService.Init()
 	end)
 
 	ConvoyRunService.ReturnHandler = GarageService.ReturnToGarage
+
+	-- New paint, trail or flag: show it on the car in the garage straight away.
+	ProgressService.OnCosmeticsChanged = function(player: Player)
+		if GarageService._garages[player.UserId] then
+			GarageService.RefreshPreview(player.UserId)
+		end
+	end
 
 	Remotes.Event("ReturnToGarage").OnServerEvent:Connect(function(player)
 		GarageService.ReturnToGarage(player)

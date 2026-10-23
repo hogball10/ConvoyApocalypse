@@ -9,6 +9,8 @@ local Shared = ReplicatedStorage:WaitForChild("ConvoyShared")
 local PartsCatalog = require(Shared:WaitForChild("PartsCatalog"))
 local HttpService = game:GetService("HttpService")
 local BlockBuilder = require(Shared:WaitForChild("BlockBuilder"))
+local Constants = require(Shared:WaitForChild("Constants"))
+local DataService = require(script.Parent:WaitForChild("DataService"))
 
 local VehicleFactory = {}
 
@@ -36,8 +38,88 @@ local function tag(inst: Instance, block: PlacedBlock, index: number)
 	inst:SetAttribute("Rot", block.rot)
 end
 
+-- The player's equipped paint, trail and flag, as catalogue entries.
+local function equippedCosmetics(player: Player): { paint: Constants.Cosmetic?, trail: Constants.Cosmetic?, flag: Constants.Cosmetic? }
+	local profile = DataService.Get(player)
+	local result: any = {}
+	if profile then
+		result.paint = Constants.CosmeticById(profile.cosmetics.paint)
+		result.trail = Constants.CosmeticById(profile.cosmetics.trail)
+		result.flag = Constants.CosmeticById(profile.cosmetics.flag)
+	end
+	return result
+end
+
+local function addTrail(root: BasePart, item: Constants.Cosmetic)
+	local top = Instance.new("Attachment")
+	top.Name = "TrailTop"
+	top.Position = Vector3.new(0, 1.6, 3)
+	top.Parent = root
+	local bottom = Instance.new("Attachment")
+	bottom.Name = "TrailBottom"
+	bottom.Position = Vector3.new(0, 0.2, 3)
+	bottom.Parent = root
+	local trail = Instance.new("Trail")
+	trail.Name = "CosmeticTrail"
+	trail.Attachment0 = top
+	trail.Attachment1 = bottom
+	trail.Lifetime = 1.1
+	trail.LightEmission = 0.7
+	trail.FaceCamera = true
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	if item.rainbow then
+		trail.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)),
+			ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 190, 50)),
+			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(120, 235, 70)),
+			ColorSequenceKeypoint.new(0.6, Color3.fromRGB(60, 200, 255)),
+			ColorSequenceKeypoint.new(0.8, Color3.fromRGB(150, 90, 255)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 90, 200)),
+		})
+	else
+		trail.Color = ColorSequence.new(item.color)
+	end
+	trail.Parent = root
+end
+
+local function addFlag(model: Model, root: BasePart, origin: CFrame, blocks: { PlacedBlock }, item: Constants.Cosmetic)
+	local topY, rearZ = 0, 0
+	for _, block in blocks do
+		local size = PartsCatalog.BlockSize(block.partId, block.rot)
+		topY = math.max(topY, block.y + size.Y)
+		rearZ = math.max(rearZ, block.z)
+	end
+	local base = origin * CFrame.new(0, topY, rearZ)
+	local pole = Instance.new("Part")
+	pole.Name = "FlagPole"
+	pole.Size = Vector3.new(0.18, 3, 0.18)
+	pole.Color = Color3.fromRGB(40, 40, 46)
+	pole.Material = Enum.Material.Metal
+	pole.CFrame = base * CFrame.new(0, 1.5, 0)
+	local cloth = Instance.new("Part")
+	cloth.Name = "FlagCloth"
+	cloth.Size = Vector3.new(0.1, 1.1, 1.8)
+	cloth.Color = item.color
+	cloth.Material = Enum.Material.Fabric
+	cloth.CFrame = base * CFrame.new(0, 2.4, 1.0)
+	for _, piece in { pole, cloth } do
+		piece.Massless = true
+		piece.CanCollide = false
+		piece.CanQuery = false
+		piece.Parent = model
+		local w = Instance.new("WeldConstraint")
+		w.Part0 = root
+		w.Part1 = piece
+		w.Parent = root
+	end
+end
+
 function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: CFrame): Model
 	local stats = PartsCatalog.ComputeBlockStats(blocks)
+	local cosmetics = equippedCosmetics(player)
 	local model = Instance.new("Model")
 	model.Name = "Vehicle_" .. player.Name
 
@@ -60,6 +142,18 @@ function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: 
 		local piece = BlockBuilder.Create(block.partId, cf)
 		piece.Name = "Block"
 		tag(piece, block, index)
+		-- Paint covers the plain building blocks; guns, engines and tanks keep their look.
+		local blockPart = PartsCatalog.Get(block.partId)
+		if cosmetics.paint and blockPart and blockPart.category == "Block" then
+			if piece:IsA("BasePart") then
+				piece.Color = cosmetics.paint.color
+			end
+			for _, desc in piece:GetDescendants() do
+				if desc:IsA("BasePart") then
+					desc.Color = cosmetics.paint.color
+				end
+			end
+		end
 		for _, desc in piece:GetDescendants() do
 			if desc:IsA("BasePart") then
 				desc.Massless = true
@@ -88,6 +182,13 @@ function VehicleFactory.Create(player: Player, blocks: { PlacedBlock }, origin: 
 			weld(root, seat)
 			seatPlaced = true
 		end
+	end
+
+	if cosmetics.trail then
+		addTrail(root, cosmetics.trail)
+	end
+	if cosmetics.flag then
+		addFlag(model, root, origin, blocks, cosmetics.flag)
 	end
 
 	local bb = Instance.new("BillboardGui")

@@ -130,6 +130,23 @@ function RunHUD.Build()
 		Parent = convoy,
 	})
 
+	-- Banner for the timed event in play (horde, kill rush, ...).
+	local banner = UIUtil.Text({
+		Name = "EventBanner",
+		Text = "",
+		Font = Enum.Font.GothamBlack,
+		Size = UDim2.fromOffset(520, 34),
+		Position = UDim2.new(0.5, 0, 0, 196),
+		AnchorPoint = Vector2.new(0.5, 0),
+		TextColor3 = Color3.fromRGB(255, 220, 90),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		BackgroundColor3 = Color3.fromRGB(10, 12, 16),
+		BackgroundTransparency = 0.25,
+		Corner = 8,
+		Parent = gui,
+	})
+	banner.Visible = false
+
 	-- Ends your run early; tap twice so a stray click does not throw one away.
 	local endRun = UIUtil.Button({
 		Name = "EndRunButton",
@@ -206,6 +223,21 @@ function RunHUD.Update(state: any)
 	local gui = RunHUD._gui
 	if not gui then
 		return
+	end
+
+	local banner = gui:FindFirstChild("EventBanner") :: TextLabel?
+	if banner then
+		local event = state.event
+		if event and not (state.ended or state.active == false) then
+			banner.Visible = true
+			if event.goal and event.goal > 0 then
+				banner.Text = string.format("%s  %d/%d  (%ds)", event.name, event.progress or 0, event.goal, math.ceil(event.timeLeft or 0))
+			else
+				banner.Text = string.format("%s: %s", event.name, event.text or "")
+			end
+		else
+			banner.Visible = false
+		end
 	end
 
 	local endRunButton = gui:FindFirstChild("EndRunButton") :: TextButton?
